@@ -1,0 +1,14 @@
+{% extends "store/base.html" %}
+
+{% block title %}SampleStore — Admin area{% endblock %}
+
+{% block content %}
+  <h2>Admin area</h2>
+  <p>Welcome, <strong>{{ user.username }}</strong>. You are here because you hold
+     the <code>{{ admin_permission }}</code> permission.</p>
+  <p class="muted">That permission was granted automatically: the portal placed
+     you in the <code>samplestore-admin</code> group, <code>sso_portal_client</code>
+     synced the membership on login, and the group owns this permission. No
+     claim-inspecting code runs in this view.</p>
+  <p><a class="button" href="{% url 'store:index' %}">Back</a></p>
+{% endblock %}

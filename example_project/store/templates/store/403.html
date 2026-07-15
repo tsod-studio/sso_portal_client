@@ -1,0 +1,20 @@
+{% extends "store/base.html" %}
+
+{% block title %}SampleStore — Access denied{% endblock %}
+
+{% block content %}
+  <h2>403 — Access denied</h2>
+  <p>The admin area requires the <code>{{ admin_permission }}</code> permission,
+     which this app grants only through the <code>{{ required_group }}</code> group.</p>
+  <p>Your current Django groups (driven by the SSO portal):
+    {% if group_names %}
+      {% for name in group_names %}<code>{{ name }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}
+    {% else %}
+      <span class="muted">none</span>
+    {% endif %}
+  </p>
+  <p class="muted">Access here derives entirely from your portal group membership
+     at your last login: a portal operator adds you to <code>{{ required_group }}</code>,
+     and your next login grants the permission. Nothing is fixable locally.</p>
+  <p><a class="button" href="{% url 'store:index' %}">Back</a></p>
+{% endblock %}

@@ -1,0 +1,65 @@
+[project]
+name = "django-sso-portal-client"
+version = "0.1.0"
+description = "Reusable Django app: SSO-portal OIDC login with automatic group/permission mapping"
+authors = [
+    {name = "cjltsod", email = "github.tsod@tsod.idv.tw"},
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=6.0",
+    "django-allauth[socialaccount]>=65.15.0",
+    # Back-channel logout: verify logout_token signatures against the portal's
+    # jwks (pyjwt) and fetch the OIDC discovery document (requests). Both are
+    # already pulled in by allauth's socialaccount extra, but we import them
+    # directly so we declare them directly.
+    "pyjwt[crypto]>=2.12.0",
+    "requests>=2.32.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+    "pytest-django>=4.12.0",
+    "ruff>=0.15.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sso_portal_client"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+testpaths = ["tests"]
+
+# ---------------------------------------------------------------------------
+# Ruff (linter + formatter) — trimmed from sso_portal's config
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 119
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "UP", "B", "SIM", "RUF", "T20", "DJ", "DTZ", "C4", "A", "PIE", "PTH", "PLC", "PLE", "LOG", "FURB", "PT", "N", "ERA", "S", "PERF", "ARG", "G", "ISC", "FBT", "TRY"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["S101", "S105", "S106", "ARG001", "ARG002", "ARG005"]
+"**/conftest.py" = ["S101"]
+"*/migrations/*" = ["RUF012"]
+# Example project (not the shipped package): its settings module carries a
+# dev-only literal SECRET_KEY (S105), and its Django TestCase suite uses
+# unittest-style assertions (no bare asserts) but is grouped here for parity.
+"example_project/config/settings.py" = ["S105"]
+# Django's TestCase idiomatically uses unittest-style assertions (assertEqual,
+# assertContains, assertTemplateUsed) that have no pytest equivalent here.
+"example_project/store/tests.py" = ["S101", "S106", "ARG002", "PT009"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sso_portal_client"]
+
+[tool.ruff.format]
+quote-style = "single"

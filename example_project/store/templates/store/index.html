@@ -1,0 +1,35 @@
+{% extends "store/base.html" %}
+{% load socialaccount %}
+
+{% block content %}
+  {% if user.is_authenticated %}
+    <p>Signed in as <strong>{{ user.username }}</strong>.</p>
+    <ul>
+      <li><strong>Django groups</strong> (synced from the portal's <code>groups</code> claim on login):
+        {% if group_names %}
+          {% for name in group_names %}<code>{{ name }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}
+        {% else %}
+          <span class="muted">none</span>
+        {% endif %}
+      </li>
+      <li><strong>is_staff</strong>: {{ user.is_staff }}</li>
+      <li><strong>is_superuser</strong>: {{ user.is_superuser }}</li>
+    </ul>
+    <p>
+      <a class="button" href="{% url 'store:admin_area' %}">Go to the admin area</a>
+      (needs <code>{{ admin_permission }}</code>, granted via the <code>samplestore-admin</code> group)
+    </p>
+    <p>
+      {# Local logout only. Portal-side RP-initiated logout is out of scope for #}
+      {# this demo — signing out here ends the RP session but not the portal's. #}
+      <a class="button" href="{% url 'account_logout' %}">Log out</a>
+    </p>
+  {% else %}
+    <p>You are not signed in.</p>
+    <p>
+      {# Straight to the openid_connect provider (id "sso_portal"), process=login. #}
+      {# With SOCIALACCOUNT_LOGIN_ON_GET this GET starts the OAuth flow directly. #}
+      <a class="button" href="{% provider_login_url 'sso_portal' process='login' %}">Log in via SSO Portal</a>
+    </p>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# uv / virtualenv (uv.lock stays tracked)
+.venv/
+
+# Testing / tooling caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# SQLite
+*.sqlite3
+db.sqlite3
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
