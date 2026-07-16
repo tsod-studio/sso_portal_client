@@ -47,6 +47,10 @@
     {# the user linked one); the view reads it from the SocialAccount's         #}
     {# extra_data. The widget falls back to initials when it is empty/missing.  #}
     {{ portal_picture|default:''|json_script:"portal-picture" }}
+    {# `locale` is the portal's standard OIDC language claim (present when the  #}
+    {# user picked a language in the portal); the widget uses it to choose its  #}
+    {# label language. Empty/missing falls through to defaultLang below.        #}
+    {{ portal_locale|default:''|json_script:"portal-locale" }}
     <script src="{{ portal_origin }}/static/js/switch.js"></script>
     <script src="{{ portal_origin }}/static/js/switch-widget.js"></script>
     <script>
@@ -59,15 +63,16 @@
         currentUser: {
           username: JSON.parse(document.getElementById('portal-username').textContent),
           name: JSON.parse(document.getElementById('portal-name').textContent),
-          picture: JSON.parse(document.getElementById('portal-picture').textContent) || null
+          picture: JSON.parse(document.getElementById('portal-picture').textContent) || null,
+          locale: JSON.parse(document.getElementById('portal-locale').textContent) || null
         },
         // `appLogoutUrl` adds a "Log out (this app)" entry that ends only this
         // RP's session (allauth's local logout), demonstrating features.appLogout.
         appLogoutUrl: '{% url 'account_logout' %}',
         // `defaultLang` demos the built-in zh-hant label table: the dropdown
         // renders in Traditional Chinese unless the signed-in portal user has a
-        // saved language preference (delivered by the users fetch), which wins.
-        // Use `lang: 'zh-hant'` instead to pin the language regardless of that.
+        // saved language preference (currentUser.locale, from the OIDC `locale`
+        // claim), which wins. Use `lang: 'zh-hant'` to pin it regardless.
         defaultLang: 'zh-hant',
         sessionPingUrl: '{% url 'sso_portal_client:session_ping' %}'
       });

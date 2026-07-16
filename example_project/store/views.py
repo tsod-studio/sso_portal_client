@@ -26,25 +26,33 @@ def _portal_origin() -> str:
     return f'{parsed.scheme}://{parsed.netloc}'
 
 
-def _portal_picture(user: object) -> str | None:
-    """Best-effort avatar URL for the switch widget's badge.
+def _portal_claim(user: object, name: str) -> str | None:
+    """Best-effort read of a single OIDC claim the portal issued for ``user``.
 
-    The portal issues a standard OIDC ``picture`` claim (a LINE avatar, when
-    the user has a linked LINE social account). allauth 65 stores the token
-    response under ``extra_data`` as ``{'userinfo': {...}, 'id_token': {...}}``;
-    we check ``id_token`` first (authoritative, signed), then ``userinfo``, then
-    a legacy flat layout where claims sit at the top level. Any absence (no
-    social account, no claim) yields ``None`` and the widget falls back to
-    initials.
+    allauth 65 stores the token response under ``extra_data`` as
+    ``{'userinfo': {...}, 'id_token': {...}}``; we check ``id_token`` first
+    (authoritative, signed), then ``userinfo``, then a legacy flat layout where
+    claims sit at the top level. Any absence (no social account, no claim)
+    yields ``None``.
     """
     account = user.socialaccount_set.filter(provider='sso_portal').first()  # type: ignore[attr-defined]
     if account is None:
         return None
     data = account.extra_data or {}
     for container in (data.get('id_token'), data.get('userinfo'), data):
-        if isinstance(container, dict) and container.get('picture'):
-            return container['picture']
+        if isinstance(container, dict) and container.get(name):
+            return container[name]
     return None
+
+
+def _portal_picture(user: object) -> str | None:
+    """Best-effort avatar URL for the switch widget's badge.
+
+    The portal issues a standard OIDC ``picture`` claim (a LINE avatar, when
+    the user has a linked LINE social account); absent, the widget falls back
+    to initials.
+    """
+    return _portal_claim(user, 'picture')
 
 
 def index(request: HttpRequest) -> HttpResponse:
@@ -54,6 +62,10 @@ def index(request: HttpRequest) -> HttpResponse:
         context['group_names'] = sorted(request.user.groups.values_list('name', flat=True))
         context['admin_permission'] = ADMIN_PERMISSION
         context['portal_picture'] = _portal_picture(request.user)
+        # Standard OIDC ``locale`` claim: the portal user's saved UI language,
+        # present only when they have picked one. Passed to the widget's
+        # currentUser.locale so it renders in the user's own language.
+        context['portal_locale'] = _portal_claim(request.user, 'locale')
     response = render(request, 'store/index.html', context)
     # The store-switch popup posts its ``sso:switched`` result back through
     # ``window.opener``. Django's SecurityMiddleware defaults every response to
