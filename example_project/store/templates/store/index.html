@@ -64,6 +64,11 @@
         // `appLogoutUrl` adds a "Log out (this app)" entry that ends only this
         // RP's session (allauth's local logout), demonstrating features.appLogout.
         appLogoutUrl: '{% url 'account_logout' %}',
+        // `defaultLang` demos the built-in zh-hant label table: the dropdown
+        // renders in Traditional Chinese unless the signed-in portal user has a
+        // saved language preference (delivered by the users fetch), which wins.
+        // Use `lang: 'zh-hant'` instead to pin the language regardless of that.
+        defaultLang: 'zh-hant',
         sessionPingUrl: '{% url 'sso_portal_client:session_ping' %}'
       });
     </script>
@@ -91,7 +96,7 @@
       {# in" and offers the switch list + sign-in + back-to-portal (leave /     #}
       {# log-out entries and the session guard are suppressed). The plain       #}
       {# switch.js button above stays as the minimal-integration reference.     #}
-      PortalSwitchWidget.init({ portalOrigin: anonPortalOrigin, loginUrl: anonLoginUrl });
+      PortalSwitchWidget.init({ portalOrigin: anonPortalOrigin, loginUrl: anonLoginUrl, defaultLang: 'zh-hant' });
     </script>
   {% endif %}
 {% endblock %}
