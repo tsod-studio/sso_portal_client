@@ -43,6 +43,10 @@
     {{ portal_origin|json_script:"portal-origin" }}
     {{ user.username|json_script:"portal-username" }}
     {{ user.get_full_name|default:user.username|json_script:"portal-name" }}
+    {# `picture` is the portal's standard OIDC avatar claim (a LINE avatar when #}
+    {# the user linked one); the view reads it from the SocialAccount's         #}
+    {# extra_data. The widget falls back to initials when it is empty/missing.  #}
+    {{ portal_picture|default:''|json_script:"portal-picture" }}
     <script src="{{ portal_origin }}/static/js/switch.js"></script>
     <script src="{{ portal_origin }}/static/js/switch-widget.js"></script>
     <script>
@@ -54,8 +58,12 @@
         loginUrl: loginUrl,
         currentUser: {
           username: JSON.parse(document.getElementById('portal-username').textContent),
-          name: JSON.parse(document.getElementById('portal-name').textContent)
+          name: JSON.parse(document.getElementById('portal-name').textContent),
+          picture: JSON.parse(document.getElementById('portal-picture').textContent) || null
         },
+        // `appLogoutUrl` adds a "Log out (this app)" entry that ends only this
+        // RP's session (allauth's local logout), demonstrating features.appLogout.
+        appLogoutUrl: '{% url 'account_logout' %}',
         sessionPingUrl: '{% url 'sso_portal_client:session_ping' %}'
       });
     </script>
@@ -73,12 +81,17 @@
       <button data-portal-switch type="button">Switch User</button>
     </p>
     <script src="{{ portal_origin }}/static/js/switch.js"></script>
+    <script src="{{ portal_origin }}/static/js/switch-widget.js"></script>
     {{ portal_origin|json_script:"portal-origin-anon" }}
     <script>
-      PortalSwitch.init({
-        portalOrigin: JSON.parse(document.getElementById('portal-origin-anon').textContent),
-        loginUrl: '{% provider_login_url 'sso_portal' process='login' %}'
-      });
+      const anonPortalOrigin = JSON.parse(document.getElementById('portal-origin-anon').textContent);
+      const anonLoginUrl = '{% provider_login_url 'sso_portal' process='login' %}';
+      PortalSwitch.init({ portalOrigin: anonPortalOrigin, loginUrl: anonLoginUrl });
+      {# Anonymous-mode widget: no currentUser, so the badge shows "Not signed  #}
+      {# in" and offers the switch list + sign-in + back-to-portal (leave /     #}
+      {# log-out entries and the session guard are suppressed). The plain       #}
+      {# switch.js button above stays as the minimal-integration reference.     #}
+      PortalSwitchWidget.init({ portalOrigin: anonPortalOrigin, loginUrl: anonLoginUrl });
     </script>
   {% endif %}
 {% endblock %}
