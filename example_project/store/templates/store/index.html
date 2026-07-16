@@ -66,5 +66,19 @@
       {# With SOCIALACCOUNT_LOGIN_ON_GET this GET starts the OAuth flow directly. #}
       <a class="button" href="{% provider_login_url 'sso_portal' process='login' %}">Log in via SSO Portal</a>
     </p>
+    <p>
+      {# The switch popup works from an anonymous portal session, so a kiosk #}
+      {# left on this logged-out page (the leave-station flow ends here) can #}
+      {# hand over to the next person via PIN without a full login.          #}
+      <button data-portal-switch type="button">Switch User</button>
+    </p>
+    <script src="{{ portal_origin }}/static/js/switch.js"></script>
+    {{ portal_origin|json_script:"portal-origin-anon" }}
+    <script>
+      PortalSwitch.init({
+        portalOrigin: JSON.parse(document.getElementById('portal-origin-anon').textContent),
+        loginUrl: '{% provider_login_url 'sso_portal' process='login' %}'
+      });
+    </script>
   {% endif %}
 {% endblock %}
