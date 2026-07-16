@@ -7,16 +7,28 @@ because ``sso_portal_client`` synced them into the ``samplestore-admin`` group
 (which owns that permission — see ``migrations/0002_admin_group.py``).
 """
 
+from urllib.parse import urlparse
+
 from django.contrib.auth.decorators import login_required, permission_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
+from sso_portal_client.conf import get_settings
+
 ADMIN_PERMISSION = 'store.view_admin_area'
+
+
+def _portal_origin() -> str:
+    """Portal origin (scheme://host[:port]) for the store-switch scripts,
+    derived from SSO_PORTAL_CLIENT['SERVER_URL'] (the issuer, e.g. .../o).
+    """
+    parsed = urlparse(get_settings()['SERVER_URL'])
+    return f'{parsed.scheme}://{parsed.netloc}'
 
 
 def index(request: HttpRequest) -> HttpResponse:
     """Landing page: login state + the user's synced groups and flags."""
-    context: dict[str, object] = {}
+    context: dict[str, object] = {'portal_origin': _portal_origin()}
     if request.user.is_authenticated:
         context['group_names'] = sorted(request.user.groups.values_list('name', flat=True))
         context['admin_permission'] = ADMIN_PERMISSION

@@ -7,6 +7,7 @@ without any network access.
 
 import json
 import time
+from urllib.parse import parse_qs, urlparse
 
 import jwt
 import pytest
@@ -14,8 +15,10 @@ from allauth.socialaccount.models import SocialAccount
 from cryptography.hazmat.primitives.asymmetric import rsa
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
+from django.test import override_settings
 
 from sso_portal_client import views
+from sso_portal_client.conf import SESSION_ID_TOKEN_KEY
 from sso_portal_client.models import PortalSession
 
 pytestmark = pytest.mark.django_db
@@ -25,6 +28,8 @@ CLIENT_ID = 'test-client-id'  # matches tests/settings.py
 KID = 'test-key-1'
 LOGOUT_URL = '/sso/backchannel-logout/'
 PING_URL = '/sso/session-ping/'
+END_SESSION = 'http://127.0.0.1:8000/o/logout/'
+GLOBAL_LOGOUT_URL = '/sso/logout/'
 
 
 @pytest.fixture(scope='module')
@@ -37,7 +42,11 @@ def portal_endpoints(monkeypatch, rsa_key):
     """Serve discovery + jwks from fixtures instead of the network."""
     jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(rsa_key.public_key()))
     jwk.update({'kid': KID, 'alg': 'RS256', 'use': 'sig'})
-    monkeypatch.setattr(views, '_discovery', lambda: {'issuer': ISSUER, 'jwks_uri': 'http://portal.test/o/jwks'})
+    monkeypatch.setattr(
+        views,
+        '_discovery',
+        lambda: {'issuer': ISSUER, 'jwks_uri': 'http://portal.test/o/jwks', 'end_session_endpoint': END_SESSION},
+    )
     monkeypatch.setattr(jwt.PyJWKClient, 'fetch_data', lambda self: {'keys': [jwk]})
 
 
@@ -185,3 +194,100 @@ def test_ping_does_not_refresh_session(client, user):
 def test_ping_post_not_allowed(client, user):
     client.force_login(user)
     assert client.post(PING_URL).status_code == 405
+
+
+# --- global_logout (RP-initiated "log out everywhere") --------------------------
+
+
+def redirect_target(response):
+    location = response.headers['Location']
+    parsed = urlparse(location)
+    base = f'{parsed.scheme}://{parsed.netloc}{parsed.path}'
+    return base, parse_qs(parsed.query)
+
+
+def test_global_logout_get_not_allowed(client):
+    assert client.get(GLOBAL_LOGOUT_URL).status_code == 405
+
+
+def test_global_logout_no_hint_clears_session_and_redirects(client, user):
+    client.force_login(user)
+    assert '_auth_user_id' in client.session
+
+    response = client.post(GLOBAL_LOGOUT_URL)
+
+    assert response.status_code == 302
+    # No hint stashed -> bare end_session_endpoint, no post_logout_redirect_uri.
+    base, params = redirect_target(response)
+    assert base == END_SESSION
+    assert params == {}
+    # Local logout always happened.
+    assert '_auth_user_id' not in client.session
+
+
+@override_settings(
+    SSO_PORTAL_CLIENT={
+        'SERVER_URL': ISSUER,
+        'CLIENT_ID': CLIENT_ID,
+        'POST_LOGOUT_REDIRECT_URL': 'http://localhost:9002/',
+    }
+)
+def test_global_logout_with_hint_sends_hint_and_post_logout_uri(client, user):
+    client.force_login(user)
+    session = client.session
+    session[SESSION_ID_TOKEN_KEY] = 'raw.jwt.token'
+    session.save()
+
+    response = client.post(GLOBAL_LOGOUT_URL)
+
+    assert response.status_code == 302
+    base, params = redirect_target(response)
+    assert base == END_SESSION
+    assert params['id_token_hint'] == ['raw.jwt.token']
+    assert params['post_logout_redirect_uri'] == ['http://localhost:9002/']
+    assert '_auth_user_id' not in client.session
+
+
+def test_global_logout_with_hint_but_no_post_logout_setting_omits_uri(client, user):
+    # tests/settings.py sets no POST_LOGOUT_REDIRECT_URL (default None).
+    client.force_login(user)
+    session = client.session
+    session[SESSION_ID_TOKEN_KEY] = 'raw.jwt.token'
+    session.save()
+
+    response = client.post(GLOBAL_LOGOUT_URL)
+
+    base, params = redirect_target(response)
+    assert base == END_SESSION
+    assert params['id_token_hint'] == ['raw.jwt.token']
+    assert 'post_logout_redirect_uri' not in params
+
+
+@override_settings(
+    SSO_PORTAL_CLIENT={
+        'SERVER_URL': ISSUER,
+        'CLIENT_ID': CLIENT_ID,
+        'POST_LOGOUT_REDIRECT_URL': 'http://localhost:9002/',
+    }
+)
+def test_global_logout_discovery_failure_logs_out_locally_and_uses_fallback(client, user, monkeypatch):
+    def boom():
+        raise RuntimeError
+
+    monkeypatch.setattr(views, '_discovery', boom)
+    client.force_login(user)
+
+    response = client.post(GLOBAL_LOGOUT_URL)
+
+    assert response.status_code == 302
+    assert response.headers['Location'] == 'http://localhost:9002/'
+    # Local logout still happened even though the portal was unreachable.
+    assert '_auth_user_id' not in client.session
+
+
+def test_global_logout_anonymous_still_redirects(client):
+    response = client.post(GLOBAL_LOGOUT_URL)
+    assert response.status_code == 302
+    base, params = redirect_target(response)
+    assert base == END_SESSION
+    assert params == {}

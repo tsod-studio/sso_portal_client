@@ -129,6 +129,11 @@ SSO_PORTAL_CLIENT = {
     'CLIENT_SECRET': os.environ.get('SSO_CLIENT_SECRET', ''),
     'GROUP_PREFIX': None,
     'STAFF_GROUPS': ['samplestore-admin'],
+    # RP-initiated logout ("Log out everywhere"): the absolute URL the portal
+    # sends the browser back to after ending its session. Must be registered as
+    # a post_logout_redirect_uri on this app's portal OAuth2 Application (DOT
+    # validates it). Also the local fallback if the portal is unreachable.
+    'POST_LOGOUT_REDIRECT_URL': 'http://localhost:9002/',
 }
 
 SOCIALACCOUNT_PROVIDERS = {'openid_connect': provider_config()}

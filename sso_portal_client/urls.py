@@ -9,4 +9,5 @@ app_name = 'sso_portal_client'
 urlpatterns = [
     path('backchannel-logout/', views.backchannel_logout, name='backchannel_logout'),
     path('session-ping/', views.session_ping, name='session_ping'),
+    path('logout/', views.global_logout, name='logout'),
 ]

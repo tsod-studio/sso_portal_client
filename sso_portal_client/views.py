@@ -13,17 +13,25 @@ session cannot be revoked server-side.
 
 import logging
 from typing import Any
+from urllib.parse import urlencode
 
 import jwt
 import requests
 from allauth.socialaccount.models import SocialAccount
+from django.conf import settings as django_settings
+from django.contrib.auth import logout as auth_logout
 from django.contrib.sessions.models import Session
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 from jwt import PyJWKClient
 
-from sso_portal_client.conf import PROVIDER_ID, discovery_url, get_settings
+from sso_portal_client.conf import (
+    PROVIDER_ID,
+    SESSION_ID_TOKEN_KEY,
+    discovery_url,
+    get_settings,
+)
 from sso_portal_client.models import PortalSession
 
 logger = logging.getLogger(__name__)
@@ -129,3 +137,68 @@ def session_ping(request: HttpRequest) -> JsonResponse:
             'sid': portal_session.sid if portal_session else None,
         }
     )
+
+
+def _local_fallback_url() -> str:
+    """Where to send the browser when the portal's end_session_endpoint can't
+    be resolved (discovery unreachable/malformed). Local logout already
+    happened, so this only affects where the user lands — never a 500.
+
+    Configurable, in priority order: SSO_PORTAL_CLIENT['POST_LOGOUT_REDIRECT_URL']
+    (the same landing page the portal is asked to return to), then Django's
+    stock ``LOGOUT_REDIRECT_URL``, then ``'/'``.
+    """
+    return get_settings()['POST_LOGOUT_REDIRECT_URL'] or getattr(django_settings, 'LOGOUT_REDIRECT_URL', None) or '/'
+
+
+@require_POST
+def global_logout(request: HttpRequest) -> HttpResponse:
+    """RP-initiated ("log out everywhere") logout for browser sessions.
+
+    POST-only (logout is state-changing; GET yields 405, mirroring how Django
+    and allauth treat logout). The flow:
+
+    1. Capture the stashed raw id_token (``SESSION_ID_TOKEN_KEY``) BEFORE
+       clearing the session — see that constant's docstring: this package does
+       not populate it (no supported allauth hook exposes the raw JWT), so in
+       practice the hint is absent and we take the no-hint path below.
+    2. ``auth.logout(request)`` ALWAYS runs — local logout is unconditional and
+       never depends on the portal being reachable.
+    3. Redirect (302) to the portal's ``end_session_endpoint`` from the
+       discovery document. If discovery fails, still redirect — to the local
+       fallback — instead of 500ing.
+
+    Query params on the portal redirect:
+
+    - ``id_token_hint`` only when a raw id_token was stashed. With a valid hint
+      the portal (``ALWAYS_PROMPT=False``) skips its logout-confirmation page.
+    - ``post_logout_redirect_uri`` only alongside a hint (the OIDC RP-Initiated
+      Logout spec ties the two, and the portal validates the URI against the
+      Application's registered ``post_logout_redirect_uris``). Value comes from
+      ``POST_LOGOUT_REDIRECT_URL``; omitted when unset.
+
+    Without a hint the portal shows its confirmation prompt — the documented
+    degraded-but-functional UX.
+    """
+    id_token = request.session.get(SESSION_ID_TOKEN_KEY)
+
+    # Local logout is unconditional and happens first (flushes the session).
+    auth_logout(request)
+
+    try:
+        end_session_endpoint = _discovery().get('end_session_endpoint')
+    except Exception:
+        logger.warning('global logout: discovery fetch failed; redirecting to local fallback')
+        end_session_endpoint = None
+    if not end_session_endpoint:
+        return HttpResponseRedirect(_local_fallback_url())
+
+    params: dict[str, str] = {}
+    if id_token:
+        params['id_token_hint'] = id_token
+        post_logout_redirect_uri = get_settings()['POST_LOGOUT_REDIRECT_URL']
+        if post_logout_redirect_uri:
+            params['post_logout_redirect_uri'] = post_logout_redirect_uri
+
+    url = f'{end_session_endpoint}?{urlencode(params)}' if params else end_session_endpoint
+    return HttpResponseRedirect(url)

@@ -9,6 +9,7 @@ An RP configures the whole package through a single settings dict::
         'GROUP_PREFIX': None,    # None => manage ALL group memberships
         'STAFF_GROUPS': [],      # claim groups granting is_staff (empty = never touch)
         'SUPERUSER_GROUPS': [],  # same for is_superuser (empty = never touch)
+        'POST_LOGOUT_REDIRECT_URL': None,  # absolute URL for RP-initiated logout
     }
 """
 
@@ -22,6 +23,19 @@ from django.core.exceptions import ImproperlyConfigured
 # against allauth 65.18 providers/base/provider.py sub_id).
 PROVIDER_ID = 'sso_portal'
 
+# Namespaced Django-session key under which the RAW id_token JWT would be
+# stashed at login to enable a prompt-free RP-initiated logout. It is NOT
+# populated by this package: allauth 65.18 exposes no supported hook that
+# surfaces the raw id_token string (the openid_connect adapter decodes it and
+# discards the raw JWT; SocialAccount.extra_data['id_token'] holds only the
+# decoded claims), and the callback view hardcodes the stock adapter, so
+# capture would require monkeypatching or re-registering a custom provider.
+# `views.global_logout` reads this key if something else (a future allauth
+# release, or a host project that CAN reach the raw token) has set it, and
+# omits the id_token_hint otherwise. See the README "Log out everywhere"
+# section for the degraded-but-functional no-hint UX.
+SESSION_ID_TOKEN_KEY = '_sso_portal_client_id_token'  # noqa: S105  # session key name, not a secret
+
 _DEFAULTS: dict[str, Any] = {
     'SERVER_URL': None,
     'CLIENT_ID': None,
@@ -29,6 +43,7 @@ _DEFAULTS: dict[str, Any] = {
     'GROUP_PREFIX': None,
     'STAFF_GROUPS': [],
     'SUPERUSER_GROUPS': [],
+    'POST_LOGOUT_REDIRECT_URL': None,
 }
 
 _REQUIRED = ('SERVER_URL', 'CLIENT_ID')

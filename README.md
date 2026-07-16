@@ -68,7 +68,7 @@ URLs:
 ```python
 urlpatterns = [
     path('accounts/', include('allauth.urls')),
-    path('sso/', include('sso_portal_client.urls')),   # backchannel-logout + session-ping
+    path('sso/', include('sso_portal_client.urls')),   # backchannel-logout + session-ping + logout
 ]
 ```
 
@@ -108,6 +108,7 @@ login revokes it. No role models, no claim parsing, no custom decorators.
 | `GROUP_PREFIX` | `None` | Group-sync scope, see table below |
 | `STAFF_GROUPS` | `[]` | Claim groups granting `is_staff` (empty = never touch the flag) |
 | `SUPERUSER_GROUPS` | `[]` | Same for `is_superuser` |
+| `POST_LOGOUT_REDIRECT_URL` | `None` | Absolute URL for RP-initiated logout (see "Log out everywhere"); `None` omits `post_logout_redirect_uri` |
 
 ### `GROUP_PREFIX` semantics
 
@@ -141,6 +142,63 @@ user switches away.
 
 Requires the **database session backend** (Django's default) — a
 signed-cookie session cannot be revoked server-side.
+
+## Log out everywhere (RP-initiated logout)
+
+`POST /sso/logout/` ends the session **everywhere**, not just in this app.
+Back-channel logout (above) is the portal pushing a logout to you; this is the
+reverse — your user clicking "log out" here and having the portal's session
+(and, via the portal's own fan-out, every other RP) end too.
+
+The view:
+
+1. Logs out locally **first and unconditionally** — the local session is
+   always cleared, even if the portal is unreachable.
+2. Redirects (302) to the portal's `end_session_endpoint` (from the discovery
+   document). If discovery can't be fetched, it still logs out locally and
+   redirects to a local fallback instead of erroring (see below).
+
+POST only (logout is state-changing) — a `GET` returns 405. Wire a small
+CSRF-protected form:
+
+```html
+<form method="post" action="{% url 'sso_portal_client:logout' %}">
+  {% csrf_token %}
+  <button type="submit">Log out everywhere</button>
+</form>
+```
+
+### Settings
+
+- `POST_LOGOUT_REDIRECT_URL` (absolute URL, default `None`): where the portal
+  returns the browser after ending its session. It must be registered as a
+  `post_logout_redirect_uris` value on this app's portal OAuth2 Application —
+  django-oauth-toolkit validates the URI against that list. It is also the
+  **local fallback** when the portal's discovery document can't be fetched
+  (then Django's `LOGOUT_REDIRECT_URL`, then `/`).
+
+### Hint-or-prompt behavior (a note on the degraded UX)
+
+The OIDC RP-Initiated Logout spec lets the RP pass an `id_token_hint` (the raw
+id_token JWT) so the portal can log the user out **without a confirmation
+prompt** and honor `post_logout_redirect_uri`. This package does **not** send
+the hint, because **allauth 65.18 exposes no supported hook that surfaces the
+raw id_token string**: the `openid_connect` adapter decodes the id_token and
+stores only the decoded claims in `SocialAccount.extra_data['id_token']`; the
+raw JWT is discarded, `SocialToken` has no field for it, and the callback view
+hardcodes the stock adapter (so a custom `oauth2_adapter_class` isn't honored).
+Capturing it would require monkeypatching or re-registering a full custom
+provider — both out of scope for a config-only package.
+
+Consequence (the documented degraded-but-functional UX): without a hint the
+portal shows its logout **confirmation page**, and `post_logout_redirect_uri`
+is omitted (the spec ties it to the hint). Logout still works end to end — the
+user just clicks "confirm" once. If a future allauth release (or a host project
+that *can* reach the raw token) stashes the raw id_token JWT in the Django
+session under `sso_portal_client.conf.SESSION_ID_TOKEN_KEY`, `global_logout`
+picks it up automatically and sends both `id_token_hint` and (when
+`POST_LOGOUT_REDIRECT_URL` is set) `post_logout_redirect_uri` for a prompt-free
+logout — no code change needed here.
 
 ## Session ping
 
@@ -205,11 +263,14 @@ What it demonstrates:
 - A custom 403 page lists the user's current groups and explains that access
   derives from SSO group membership → Django permission.
 
-> The switch-widget script tags from the Flask sample are intentionally
-> **not** included here — the demo is scoped to the group-sync story, and the
-> package already ships the `session-ping` / `backchannel-logout` endpoints an
-> integrator would wire to the widget. See the Flask sample for full
-> switch-widget integration.
+- The index page also wires the portal's in-store fast-switch integration
+  (`switch.js` button + `switch-widget.js` badge), pointing the widget's
+  session guard at the package's read-only `/sso/session-ping/`. Combined
+  with the back-channel logout receiver, switching users in the portal popup
+  kills this app's old session and re-enters the OIDC flow as the new user.
+  Prerequisites are the portal's store-switch demo data (`setup_switch_demo`:
+  Demo Store at `127.0.0.1`, PINs `1234`/`5678`) and a full portal login by
+  each switch target **today** (daily enrollment).
 
 ### 1. Prepare the portal (sso_portal, on 127.0.0.1:8000)
 
@@ -246,6 +307,7 @@ if app is None:
         client_type=Application.CLIENT_CONFIDENTIAL,
         authorization_grant_type=Application.GRANT_AUTHORIZATION_CODE,
         redirect_uris=REDIRECT,
+        post_logout_redirect_uris='http://localhost:9002/',  # for /sso/logout/ (DOT validates it)
         algorithm=Application.RS256_ALGORITHM,
         skip_authorization=True,
     )

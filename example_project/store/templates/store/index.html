@@ -20,10 +20,45 @@
       (needs <code>{{ admin_permission }}</code>, granted via the <code>samplestore-admin</code> group)
     </p>
     <p>
-      {# Local logout only. Portal-side RP-initiated logout is out of scope for #}
-      {# this demo — signing out here ends the RP session but not the portal's. #}
-      <a class="button" href="{% url 'account_logout' %}">Log out</a>
+      {# Two logout paths. "Log out (this app)" is allauth's local logout — it #}
+      {# ends only this RP's session; the portal (and any other RP) stays in.  #}
+      <a class="button" href="{% url 'account_logout' %}">Log out (this app)</a>
+      {# "Log out everywhere" hits the package's RP-initiated logout: local    #}
+      {# logout here, then a redirect to the portal's end_session_endpoint so  #}
+      {# the portal session ends too. POST (csrf) because logout is state-      #}
+      {# changing. POST_LOGOUT_REDIRECT_URL brings the browser back here.       #}
+      <form method="post" action="{% url 'sso_portal_client:logout' %}" style="display:inline">
+        {% csrf_token %}
+        <button class="button" type="submit">Log out everywhere</button>
+      </form>
     </p>
+    <p>
+      {# In-store fast switch (portal's apps.store_switch). The package supplies #}
+      {# the two endpoints the widget needs: the read-only session guard at      #}
+      {# /sso/session-ping/ and the back-channel logout receiver that kills this #}
+      {# RP session when the portal switches users. loginUrl re-enters the OIDC  #}
+      {# flow (SOCIALACCOUNT_LOGIN_ON_GET makes the GET start it directly).      #}
+      <button data-portal-switch type="button">Switch User</button>
+    </p>
+    {{ portal_origin|json_script:"portal-origin" }}
+    {{ user.username|json_script:"portal-username" }}
+    {{ user.get_full_name|default:user.username|json_script:"portal-name" }}
+    <script src="{{ portal_origin }}/static/js/switch.js"></script>
+    <script src="{{ portal_origin }}/static/js/switch-widget.js"></script>
+    <script>
+      const portalOrigin = JSON.parse(document.getElementById('portal-origin').textContent);
+      const loginUrl = '{% provider_login_url 'sso_portal' process='login' %}';
+      PortalSwitch.init({ portalOrigin: portalOrigin, loginUrl: loginUrl });
+      PortalSwitchWidget.init({
+        portalOrigin: portalOrigin,
+        loginUrl: loginUrl,
+        currentUser: {
+          username: JSON.parse(document.getElementById('portal-username').textContent),
+          name: JSON.parse(document.getElementById('portal-name').textContent)
+        },
+        sessionPingUrl: '{% url 'sso_portal_client:session_ping' %}'
+      });
+    </script>
   {% else %}
     <p>You are not signed in.</p>
     <p>
