@@ -35,12 +35,12 @@ PROVIDER_ID = 'sso_portal'
 # release, or a host project that CAN reach the raw token) has set it, and
 # omits the id_token_hint otherwise. See the README "Log out everywhere"
 # section for the degraded-but-functional no-hint UX.
-SESSION_ID_TOKEN_KEY = '_sso_portal_client_id_token'  # noqa: S105  # session key name, not a secret
+SESSION_ID_TOKEN_KEY = '_sso_portal_client_id_token'  # noqa: S105 # nosec B105  # session key name, not a secret
 
 _DEFAULTS: dict[str, Any] = {
     'SERVER_URL': None,
     'CLIENT_ID': None,
-    'CLIENT_SECRET': '',
+    'CLIENT_SECRET': '',  # nosec B105  # empty default, not a secret value
     'GROUP_PREFIX': None,
     'STAFF_GROUPS': [],
     'SUPERUSER_GROUPS': [],
@@ -78,7 +78,7 @@ def discovery_url() -> str:
     Mirrors allauth's convention (OpenIDConnectProvider.wk_server_url):
     SERVER_URL may be either the bare issuer or a full discovery URL.
     """
-    url = get_settings()['SERVER_URL'].rstrip('/')
+    url: str = get_settings()['SERVER_URL'].rstrip('/')
     if '/.well-known/' not in url:
         url += '/.well-known/openid-configuration'
     return url

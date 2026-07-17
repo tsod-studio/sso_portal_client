@@ -20,9 +20,17 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "bandit>=1.9.4",
+    "coverage>=7.13.5",
+    "django-stubs[compatible-mypy]>=6.0.2",
+    "mypy>=1.20.1",
+    "pip-audit>=2.10.0",
+    "pre-commit>=4.5.1",
     "pytest>=9.0.0",
+    "pytest-cov>=7.1.0",
     "pytest-django>=4.12.0",
     "ruff>=0.15.0",
+    "types-requests>=2.33.0.20260402",
 ]
 
 [build-system]
@@ -35,6 +43,7 @@ packages = ["sso_portal_client"]
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
 testpaths = ["tests"]
+addopts = "--strict-markers -ra"
 
 # ---------------------------------------------------------------------------
 # Ruff (linter + formatter) — trimmed from sso_portal's config
@@ -44,7 +53,7 @@ target-version = "py312"
 line-length = 119
 
 [tool.ruff.lint]
-select = ["F", "E", "W", "I", "UP", "B", "SIM", "RUF", "T20", "DJ", "DTZ", "C4", "A", "PIE", "PTH", "PLC", "PLE", "LOG", "FURB", "PT", "N", "ERA", "S", "PERF", "ARG", "G", "ISC", "FBT", "TRY"]
+select = ["F", "E", "W", "I", "UP", "B", "SIM", "RUF", "T20", "DJ", "DTZ", "C4", "A", "PIE", "PTH", "PLC", "PLE", "LOG", "FURB", "PT", "N", "ERA", "TCH", "S", "PERF", "ARG", "G", "ISC", "FBT", "TRY"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*.py" = ["S101", "S105", "S106", "ARG001", "ARG002", "ARG005"]
@@ -63,3 +72,51 @@ known-first-party = ["sso_portal_client"]
 
 [tool.ruff.format]
 quote-style = "single"
+
+# ---------------------------------------------------------------------------
+# Mypy (type checker)
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+warn_unreachable = true
+warn_no_return = true
+strict_optional = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[tool.django-stubs]
+django_settings_module = "tests.settings"
+
+[[tool.mypy.overrides]]
+module = ["allauth.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["sso_portal_client"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]
+
+# ---------------------------------------------------------------------------
+# Bandit (security linter)
+# ---------------------------------------------------------------------------
+[tool.bandit]
+[tool.bandit.assert_used]
+skips = ["*/tests.py", "*/test_*.py", "*/tests/*.py", "**/conftest.py"]

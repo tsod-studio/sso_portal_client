@@ -415,8 +415,11 @@ cd example_project && uv run python manage.py test store
 ## Development
 
 ```bash
-uv sync
-make test          # uv run pytest
-make lint          # uv run ruff check .
-make format-check  # uv run ruff format --check .
+make setup  # uv sync + pre-commit hooks
+make check  # lint, format, typecheck, security, audit, migrations, test — everything CI runs
 ```
+
+Individual gates: `make lint` / `make format` / `make format-check` (ruff),
+`make typecheck` (mypy), `make security` (bandit), `make audit` (pip-audit),
+`make test` (the package's `pytest` suite + `example_project`'s `manage.py
+test store`), `make coverage`. Run `make help` for the full target list.
