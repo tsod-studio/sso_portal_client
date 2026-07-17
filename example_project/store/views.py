@@ -20,16 +20,40 @@ ADMIN_PERMISSION = 'store.view_admin_area'
 
 
 def _portal_origin() -> str:
-    """Portal origin (scheme://host[:port]) for the store-switch scripts,
+    """Portal APP origin (scheme://host[:port]) for the store-switch widget,
     derived from SSO_PORTAL_CLIENT['SERVER_URL'] (the issuer, e.g. .../o).
+
+    Used for everything the widget talks to at runtime (portalOrigin, the
+    login URL, the switch popup) — this must stay the app origin even in
+    production, where it differs from the static origin below.
     """
     parsed = urlparse(get_settings()['SERVER_URL'])
     return f'{parsed.scheme}://{parsed.netloc}'
 
 
+def _portal_static_origin() -> str:
+    """Origin serving the portal's static JS (switch.js / switch-widget.js).
+
+    Defaults to ``_portal_origin()``, which is correct in development where
+    the portal's runserver serves ``/static/`` from the app origin itself.
+    In production the portal's app origin serves no ``/static/`` at all
+    (static assets live on a separate CDN domain — the portal's
+    ``STATIC_URL``), so deployments there must set
+    ``SSO_PORTAL_CLIENT['STATIC_ORIGIN']`` to that CDN origin.
+    """
+    override = get_settings()['STATIC_ORIGIN']
+    if not override:
+        return _portal_origin()
+    parsed = urlparse(override)
+    return f'{parsed.scheme}://{parsed.netloc}'
+
+
 def index(request: HttpRequest) -> HttpResponse:
     """Landing page: login state + the user's synced groups and flags."""
-    context: dict[str, object] = {'portal_origin': _portal_origin()}
+    context: dict[str, object] = {
+        'portal_origin': _portal_origin(),
+        'portal_static_origin': _portal_static_origin(),
+    }
     if request.user.is_authenticated:
         context['group_names'] = sorted(request.user.groups.values_list('name', flat=True))
         context['admin_permission'] = ADMIN_PERMISSION
