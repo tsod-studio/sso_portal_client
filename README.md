@@ -143,6 +143,24 @@ user switches away.
 Requires the **database session backend** (Django's default) — a
 signed-cookie session cannot be revoked server-side.
 
+## Reading portal claims (picture, locale, anything future)
+
+Claims delivered at login are persisted verbatim in
+``SocialAccount.extra_data`` (a JSON field) — the raw record of what the
+portal asserted. Nothing needs a dedicated column on the RP unless
+Django's own machinery reads it (groups / staff flags / User basics,
+which the login sync materializes). Read everything else on demand:
+
+```python
+from sso_portal_client.claims import get_claim, get_claims
+
+get_claim(request.user, 'picture')   # LINE avatar URL, or None
+get_claim(request.user, 'locale')    # saved portal UI language, or None
+get_claims(request.user)             # the merged claim dict
+```
+
+New portal claims become readable with zero RP migrations.
+
 ## Log out everywhere (RP-initiated logout)
 
 `POST /sso/logout/` ends the session **everywhere**, not just in this app.

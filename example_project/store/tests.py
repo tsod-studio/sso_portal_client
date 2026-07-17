@@ -17,7 +17,7 @@ from django.contrib.auth.models import Group, Permission
 from django.test import TestCase
 from django.urls import reverse
 
-from store.views import _portal_claim, _portal_picture
+from sso_portal_client.claims import get_claim
 
 User = get_user_model()
 
@@ -149,23 +149,23 @@ class PortalPictureTests(TestCase):
         user = self._user_with_extra_data(
             {'id_token': {'picture': 'https://id.example/a.jpg'}, 'userinfo': {'picture': 'https://ui.example/b.jpg'}}
         )
-        self.assertEqual(_portal_picture(user), 'https://id.example/a.jpg')
+        self.assertEqual(get_claim(user, 'picture'), 'https://id.example/a.jpg')
 
     def test_falls_back_to_userinfo(self) -> None:
         user = self._user_with_extra_data({'userinfo': {'picture': 'https://ui.example/b.jpg'}})
-        self.assertEqual(_portal_picture(user), 'https://ui.example/b.jpg')
+        self.assertEqual(get_claim(user, 'picture'), 'https://ui.example/b.jpg')
 
     def test_tolerates_legacy_flat_layout(self) -> None:
         user = self._user_with_extra_data({'picture': 'https://flat.example/c.jpg'})
-        self.assertEqual(_portal_picture(user), 'https://flat.example/c.jpg')
+        self.assertEqual(get_claim(user, 'picture'), 'https://flat.example/c.jpg')
 
     def test_none_without_a_social_account(self) -> None:
         user = User.objects.create_user(username='no-account')
-        self.assertIsNone(_portal_picture(user))
+        self.assertIsNone(get_claim(user, 'picture'))
 
     def test_none_when_claim_absent(self) -> None:
         user = self._user_with_extra_data({'userinfo': {}, 'id_token': {}})
-        self.assertIsNone(_portal_picture(user))
+        self.assertIsNone(get_claim(user, 'picture'))
 
 
 class PortalClaimTests(TestCase):
@@ -178,20 +178,20 @@ class PortalClaimTests(TestCase):
 
     def test_prefers_id_token_over_userinfo(self) -> None:
         user = self._user_with_extra_data({'id_token': {'locale': 'zh-hant'}, 'userinfo': {'locale': 'en'}})
-        self.assertEqual(_portal_claim(user, 'locale'), 'zh-hant')
+        self.assertEqual(get_claim(user, 'locale'), 'zh-hant')
 
     def test_falls_back_to_userinfo(self) -> None:
         user = self._user_with_extra_data({'userinfo': {'locale': 'en'}})
-        self.assertEqual(_portal_claim(user, 'locale'), 'en')
+        self.assertEqual(get_claim(user, 'locale'), 'en')
 
     def test_tolerates_legacy_flat_layout(self) -> None:
         user = self._user_with_extra_data({'locale': 'ja'})
-        self.assertEqual(_portal_claim(user, 'locale'), 'ja')
+        self.assertEqual(get_claim(user, 'locale'), 'ja')
 
     def test_none_without_a_social_account(self) -> None:
         user = User.objects.create_user(username='claim-no-account')
-        self.assertIsNone(_portal_claim(user, 'locale'))
+        self.assertIsNone(get_claim(user, 'locale'))
 
     def test_none_when_claim_absent(self) -> None:
         user = self._user_with_extra_data({'userinfo': {}, 'id_token': {}})
-        self.assertIsNone(_portal_claim(user, 'locale'))
+        self.assertIsNone(get_claim(user, 'locale'))

@@ -13,6 +13,7 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
+from sso_portal_client.claims import get_claim
 from sso_portal_client.conf import get_settings
 
 ADMIN_PERMISSION = 'store.view_admin_area'
@@ -26,46 +27,19 @@ def _portal_origin() -> str:
     return f'{parsed.scheme}://{parsed.netloc}'
 
 
-def _portal_claim(user: object, name: str) -> str | None:
-    """Best-effort read of a single OIDC claim the portal issued for ``user``.
-
-    allauth 65 stores the token response under ``extra_data`` as
-    ``{'userinfo': {...}, 'id_token': {...}}``; we check ``id_token`` first
-    (authoritative, signed), then ``userinfo``, then a legacy flat layout where
-    claims sit at the top level. Any absence (no social account, no claim)
-    yields ``None``.
-    """
-    account = user.socialaccount_set.filter(provider='sso_portal').first()  # type: ignore[attr-defined]
-    if account is None:
-        return None
-    data = account.extra_data or {}
-    for container in (data.get('id_token'), data.get('userinfo'), data):
-        if isinstance(container, dict) and container.get(name):
-            return container[name]
-    return None
-
-
-def _portal_picture(user: object) -> str | None:
-    """Best-effort avatar URL for the switch widget's badge.
-
-    The portal issues a standard OIDC ``picture`` claim (a LINE avatar, when
-    the user has a linked LINE social account); absent, the widget falls back
-    to initials.
-    """
-    return _portal_claim(user, 'picture')
-
-
 def index(request: HttpRequest) -> HttpResponse:
     """Landing page: login state + the user's synced groups and flags."""
     context: dict[str, object] = {'portal_origin': _portal_origin()}
     if request.user.is_authenticated:
         context['group_names'] = sorted(request.user.groups.values_list('name', flat=True))
         context['admin_permission'] = ADMIN_PERMISSION
-        context['portal_picture'] = _portal_picture(request.user)
-        # Standard OIDC ``locale`` claim: the portal user's saved UI language,
-        # present only when they have picked one. Passed to the widget's
-        # currentUser.locale so it renders in the user's own language.
-        context['portal_locale'] = _portal_claim(request.user, 'locale')
+        # Claims the portal issued at login live in SocialAccount.extra_data
+        # (JSON) — read on demand via the package helper, no RP columns needed.
+        # ``picture``: LINE avatar for the widget badge (initials fallback).
+        # ``locale``: the user's saved portal UI language, for the widget's
+        # currentUser.locale.
+        context['portal_picture'] = get_claim(request.user, 'picture')
+        context['portal_locale'] = get_claim(request.user, 'locale')
     response = render(request, 'store/index.html', context)
     # The store-switch popup posts its ``sso:switched`` result back through
     # ``window.opener``. Django's SecurityMiddleware defaults every response to
