@@ -18,7 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Dev-only literal secret — never do this in production; a real RP reads it
 # from the environment. Safe here because DEBUG runs only on localhost.
-SECRET_KEY = 'django-insecure-samplestore-demo-key-do-not-use-in-production'
+SECRET_KEY = 'django-insecure-samplestore-demo-key-do-not-use-in-production'  # nosec B105
 
 DEBUG = True
 

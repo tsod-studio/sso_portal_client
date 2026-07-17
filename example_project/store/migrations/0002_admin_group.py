@@ -14,13 +14,15 @@ safe to run in any order. Reverse simply removes the group.
 """
 
 from django.db import migrations
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
+from django.db.migrations.state import StateApps
 
 ADMIN_GROUP = 'samplestore-admin'
 PERMISSION_CODENAME = 'view_admin_area'
 PERMISSION_NAME = 'Can view the admin area'
 
 
-def create_admin_group(apps, schema_editor):  # noqa: ARG001
+def create_admin_group(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:  # noqa: ARG001
     Group = apps.get_model('auth', 'Group')
     Permission = apps.get_model('auth', 'Permission')
     ContentType = apps.get_model('contenttypes', 'ContentType')
@@ -35,7 +37,7 @@ def create_admin_group(apps, schema_editor):  # noqa: ARG001
     group.permissions.add(permission)
 
 
-def remove_admin_group(apps, schema_editor):  # noqa: ARG001
+def remove_admin_group(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:  # noqa: ARG001
     Group = apps.get_model('auth', 'Group')
     Group.objects.filter(name=ADMIN_GROUP).delete()
 
