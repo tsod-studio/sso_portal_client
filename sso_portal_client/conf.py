@@ -10,6 +10,7 @@ An RP configures the whole package through a single settings dict::
         'STAFF_GROUPS': [],      # claim groups granting is_staff (empty = never touch)
         'SUPERUSER_GROUPS': [],  # same for is_superuser (empty = never touch)
         'POST_LOGOUT_REDIRECT_URL': None,  # absolute URL for RP-initiated logout
+        'STATIC_ORIGIN': None,   # origin serving the portal's /static/js/*; None => SERVER_URL's origin
     }
 """
 
@@ -44,6 +45,7 @@ _DEFAULTS: dict[str, Any] = {
     'STAFF_GROUPS': [],
     'SUPERUSER_GROUPS': [],
     'POST_LOGOUT_REDIRECT_URL': None,
+    'STATIC_ORIGIN': None,
 }
 
 _REQUIRED = ('SERVER_URL', 'CLIENT_ID')

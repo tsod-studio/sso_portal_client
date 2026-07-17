@@ -13,6 +13,7 @@ def test_defaults_merged():
     assert cfg['GROUP_PREFIX'] is None
     assert cfg['STAFF_GROUPS'] == []
     assert cfg['SUPERUSER_GROUPS'] == []
+    assert cfg['STATIC_ORIGIN'] is None
 
 
 @override_settings(SSO_PORTAL_CLIENT={'CLIENT_ID': 'x'})

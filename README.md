@@ -109,6 +109,7 @@ login revokes it. No role models, no claim parsing, no custom decorators.
 | `STAFF_GROUPS` | `[]` | Claim groups granting `is_staff` (empty = never touch the flag) |
 | `SUPERUSER_GROUPS` | `[]` | Same for `is_superuser` |
 | `POST_LOGOUT_REDIRECT_URL` | `None` | Absolute URL for RP-initiated logout (see "Log out everywhere"); `None` omits `post_logout_redirect_uri` |
+| `STATIC_ORIGIN` | `None` | Origin serving the portal's `/static/js/switch*.js` (see "Embedding the store-switch widget"); `None` reuses `SERVER_URL`'s origin |
 
 ### `GROUP_PREFIX` semantics
 
@@ -227,6 +228,22 @@ never refresh the session** — otherwise the widget's polling would make
 your session self-renewing forever (see the docstring on
 `sso_portal_client.views.session_ping`, which mirrors the portal's Flask
 reference RP). Consequently, do not enable `SESSION_SAVE_EVERY_REQUEST`.
+
+## Embedding the store-switch widget
+
+The portal's switch widget ships as two plain `<script src>` tags
+(`switch.js` + `switch-widget.js`, see `example_project/store/templates/
+store/index.html`). `portalOrigin` passed into `PortalSwitch.init()` /
+`PortalSwitchWidget.init()` must always be the portal's **app** origin (the
+`SERVER_URL` origin) — that's what the widget talks to at runtime (login
+URL, switch popup). But in production the app origin serves no `/static/`
+at all; the portal's static assets live on a separate CDN domain
+(`STATIC_URL`). Point the `<script src>` tags there via
+`SSO_PORTAL_CLIENT['STATIC_ORIGIN']` (default `None` reuses `SERVER_URL`'s
+origin, which is correct in development where the portal's runserver does
+serve `/static/`). The CDN serves those files `Cache-Control: public,
+max-age=300` and invalidates on portal deploys, so the URL is stable — no
+cache-busting query string needed.
 
 ## `claims_synced` signal
 

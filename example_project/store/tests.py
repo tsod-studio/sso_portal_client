@@ -12,9 +12,10 @@ user into ``samplestore-admin``.
 """
 
 from allauth.socialaccount.models import SocialAccount
+from django.conf import settings as django_settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from sso_portal_client.claims import get_claim
@@ -135,6 +136,37 @@ class SwitchWiringTests(TestCase):
         response = self.client.get(reverse('store:index'))
         self.assertContains(response, 'portal-locale')
         self.assertContains(response, 'zh-hant')
+
+
+class StaticOriginTests(TestCase):
+    """`_portal_static_origin` (STATIC_ORIGIN) governs the widget script src.
+
+    `portalOrigin` (the app origin, SERVER_URL) must stay untouched — only
+    the `<script src>` tags loading switch.js/switch-widget.js move to the
+    static/CDN origin in production.
+    """
+
+    def test_defaults_to_the_app_origin(self) -> None:
+        # No STATIC_ORIGIN configured (the example project's default settings):
+        # the script tags fall back to the same origin as portalOrigin, which
+        # is what makes the portal's runserver-served /static/ work in dev
+        # with zero extra config.
+        response = self.client.get(reverse('store:index'))
+        self.assertContains(response, 'src="http://127.0.0.1:8000/static/js/switch.js"')
+        self.assertContains(response, 'src="http://127.0.0.1:8000/static/js/switch-widget.js"')
+
+    @override_settings(
+        SSO_PORTAL_CLIENT={**django_settings.SSO_PORTAL_CLIENT, 'STATIC_ORIGIN': 'https://static.portal.example'}
+    )
+    def test_static_origin_override_moves_only_the_script_tags(self) -> None:
+        response = self.client.get(reverse('store:index'))
+        self.assertContains(response, 'src="https://static.portal.example/static/js/switch.js"')
+        self.assertContains(response, 'src="https://static.portal.example/static/js/switch-widget.js"')
+        # portalOrigin (the json_script'd value PortalSwitch.init/
+        # PortalSwitchWidget.init read at runtime) must still be the app
+        # origin, not the static override — only the script src tags move.
+        self.assertContains(response, '>"http://127.0.0.1:8000"</script>')
+        self.assertNotContains(response, 'static.portal.example</script>')
 
 
 class PortalPictureTests(TestCase):

@@ -51,8 +51,8 @@
     {# user picked a language in the portal); the widget uses it to choose its  #}
     {# label language. Empty/missing falls through to defaultLang below.        #}
     {{ portal_locale|default:''|json_script:"portal-locale" }}
-    <script src="{{ portal_origin }}/static/js/switch.js"></script>
-    <script src="{{ portal_origin }}/static/js/switch-widget.js"></script>
+    <script src="{{ portal_static_origin }}/static/js/switch.js"></script>
+    <script src="{{ portal_static_origin }}/static/js/switch-widget.js"></script>
     <script>
       const portalOrigin = JSON.parse(document.getElementById('portal-origin').textContent);
       const loginUrl = '{% provider_login_url 'sso_portal' process='login' %}';
@@ -90,8 +90,8 @@
       {# hand over to the next person via PIN without a full login.          #}
       <button data-portal-switch type="button">Switch User</button>
     </p>
-    <script src="{{ portal_origin }}/static/js/switch.js"></script>
-    <script src="{{ portal_origin }}/static/js/switch-widget.js"></script>
+    <script src="{{ portal_static_origin }}/static/js/switch.js"></script>
+    <script src="{{ portal_static_origin }}/static/js/switch-widget.js"></script>
     {{ portal_origin|json_script:"portal-origin-anon" }}
     <script>
       const anonPortalOrigin = JSON.parse(document.getElementById('portal-origin-anon').textContent);
