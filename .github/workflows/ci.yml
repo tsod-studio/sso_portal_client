@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+  FORCE_COLOR: '1'
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen
+      - name: Ruff lint
+        if: ${{ !cancelled() }}
+        run: uv run ruff check --output-format=github .
+      - name: Ruff format check
+        if: ${{ !cancelled() }}
+        run: uv run ruff format --check .
+
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen
+      - name: Mypy
+        if: ${{ !cancelled() }}
+        run: |
+          echo "::add-matcher::.github/matchers/mypy.json"
+          uv run mypy sso_portal_client/ example_project/ --show-column-numbers --no-error-summary
+          echo "::remove-matcher owner=mypy::"
+
+  security:
+    name: Security & Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen
+      - name: Bandit
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          echo "::add-matcher::.github/matchers/bandit.json"
+          uv run bandit -c pyproject.toml -r sso_portal_client/ example_project/ --format custom --msg-template "{relpath}:{line}:1: {severity}: {msg} [{test_id}]" \
+            | sed -e 's/: HIGH:/:error:/i' -e 's/: MEDIUM:/:warning:/i' -e 's/: LOW:/:notice:/i'
+          echo "::remove-matcher owner=bandit::"
+      - name: pip-audit
+        if: ${{ !cancelled() }}
+        run: uv run pip-audit
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen
+      - name: Package tests with coverage
+        if: ${{ !cancelled() }}
+        run: uv run coverage run -m pytest
+      - name: Example project tests with coverage
+        if: ${{ !cancelled() }}
+        run: uv run coverage run --append example_project/manage.py test store
+      - name: Example project system check
+        if: ${{ !cancelled() }}
+        run: uv run python example_project/manage.py check --fail-level WARNING
+      - name: Example project migrations check
+        if: ${{ !cancelled() }}
+        run: uv run python example_project/manage.py makemigrations --check --dry-run
+      - name: Coverage report
+        if: ${{ !cancelled() }}
+        run: uv run coverage report
