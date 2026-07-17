@@ -1,0 +1,56 @@
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    versioning-strategy: increase-if-necessary
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - dependencies
+    open-pull-requests-limit: 10
+    groups:
+      django:
+        patterns:
+          - "django*"
+      linting:
+        dependency-type: development
+        patterns:
+          - "ruff"
+          - "mypy*"
+          - "types-*"
+          - "pre-commit"
+      testing:
+        dependency-type: development
+        patterns:
+          - "pytest*"
+          - "coverage"
+      security:
+        dependency-type: development
+        patterns:
+          - "bandit"
+          - "pip-audit"
+
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - dependencies
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci(deps)"
+    labels:
+      - dependencies
+      - ci
