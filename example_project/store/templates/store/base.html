@@ -1,4 +1,4 @@
-{% load socialaccount %}
+{% load socialaccount sso_portal_client %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -15,5 +15,12 @@
 <body>
   <h1>SampleStore <span class="muted">(Django demo RP)</span></h1>
   {% block content %}{% endblock %}
+  {# The whole store-switch widget integration, site-wide, in one tag: COOP  #}
+  {# header + request.portal_user come from PortalSwitchMiddleware          #}
+  {# (config/settings.py); this renders the widget's <script> tags +        #}
+  {# PortalSwitchWidget.init(...), reading currentUser from request.portal_user #}
+  {# (None on an anonymous or local-account page -> anonymous-mode widget). #}
+  {# See README "Two-line widget integration".                              #}
+  {% portal_switch_widget %}
 </body>
 </html>
