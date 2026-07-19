@@ -64,6 +64,14 @@ def index(request: HttpRequest) -> HttpResponse:
         # currentUser.locale.
         context['portal_picture'] = get_claim(request.user, 'picture')
         context['portal_locale'] = get_claim(request.user, 'locale')
+        # ``preferred_username``: the portal's OWN username for this person —
+        # NOT the same thing as the RP-local `user.username` field (which,
+        # under USERNAME_STRATEGY='sub_at_issuer', is now a `{sub}@{host}`
+        # identifier, not a display name). The widget's self-match against
+        # its "who's enrolled today" list (`/switch/api/users/`, portal-side
+        # usernames) needs the portal's own username here, not this app's
+        # local one — see README "Stable usernames".
+        context['portal_username'] = get_claim(request.user, 'preferred_username')
     response = render(request, 'store/index.html', context)
     # The store-switch popup posts its ``sso:switched`` result back through
     # ``window.opener``. Django's SecurityMiddleware defaults every response to

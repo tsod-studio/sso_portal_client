@@ -10,6 +10,7 @@ from sso_portal_client.conf import (
     get_settings,
     provider_config,
     session_cutoff_time,
+    username_strategy,
 )
 
 
@@ -22,6 +23,7 @@ def test_defaults_merged():
     assert cfg['STAFF_GROUPS'] == []
     assert cfg['SUPERUSER_GROUPS'] == []
     assert cfg['STATIC_ORIGIN'] is None
+    assert cfg['USERNAME_STRATEGY'] == 'sub_at_issuer'
 
 
 @override_settings(SSO_PORTAL_CLIENT={'CLIENT_ID': 'x'})
@@ -104,3 +106,25 @@ class TestSessionCutoffTime:
     def test_invalid_value_raises(self):
         with pytest.raises(ImproperlyConfigured, match='SESSION_CUTOFF_TIME'):
             session_cutoff_time()
+
+
+class TestUsernameStrategy:
+    def test_default_is_sub_at_issuer(self):
+        assert username_strategy() == 'sub_at_issuer'
+
+    @override_settings(
+        SSO_PORTAL_CLIENT={
+            'SERVER_URL': 'http://portal.test/o',
+            'CLIENT_ID': 'x',
+            'USERNAME_STRATEGY': 'preferred_username',
+        }
+    )
+    def test_preferred_username_accepted(self):
+        assert username_strategy() == 'preferred_username'
+
+    @override_settings(
+        SSO_PORTAL_CLIENT={'SERVER_URL': 'http://portal.test/o', 'CLIENT_ID': 'x', 'USERNAME_STRATEGY': 'bogus'}
+    )
+    def test_unknown_value_raises(self):
+        with pytest.raises(ImproperlyConfigured, match='USERNAME_STRATEGY'):
+            username_strategy()

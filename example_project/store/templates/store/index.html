@@ -3,7 +3,13 @@
 
 {% block content %}
   {% if user.is_authenticated %}
-    <p>Signed in as <strong>{{ user.username }}</strong>.</p>
+    {# Display name, never the raw `user.username` field: under the default #}
+    {# USERNAME_STRATEGY ('sub_at_issuer') that's now an opaque              #}
+    {# `{sub}@{issuer-host}` identifier, not anything a person should see.   #}
+    {# Prefer the full name; fall back to the portal's own preferred_username#}
+    {# claim, and only then to the local username, so this never renders    #}
+    {# blank. #}
+    <p>Signed in as <strong>{{ user.get_full_name|default:portal_username|default:user.username }}</strong>.</p>
     <ul>
       <li><strong>Django groups</strong> (synced from the portal's <code>groups</code> claim on login):
         {% if group_names %}
@@ -41,8 +47,14 @@
       <button data-portal-switch type="button">Switch User</button>
     </p>
     {{ portal_origin|json_script:"portal-origin" }}
-    {{ user.username|json_script:"portal-username" }}
-    {{ user.get_full_name|default:user.username|json_script:"portal-name" }}
+    {# The widget's currentUser.username must be the PORTAL's own username    #}
+    {# (the preferred_username claim) — it self-matches against              #}
+    {# /switch/api/users/, whose entries are portal-side usernames, not this  #}
+    {# app's local `user.username` field (an opaque `{sub}@{host}` value      #}
+    {# under the default USERNAME_STRATEGY, and never guaranteed to equal the #}
+    {# portal's own username even under the legacy strategy after a rename). #}
+    {{ portal_username|default:''|json_script:"portal-username" }}
+    {{ user.get_full_name|default:portal_username|json_script:"portal-name" }}
     {# `picture` is the portal's standard OIDC avatar claim (a LINE avatar when #}
     {# the user linked one); the view reads it from the SocialAccount's         #}
     {# extra_data. The widget falls back to initials when it is empty/missing.  #}

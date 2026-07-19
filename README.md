@@ -46,7 +46,7 @@ AUTHENTICATION_BACKENDS = [
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
-# The 5 lines that matter:
+# The 6 lines that matter:
 from sso_portal_client import provider_config
 
 SSO_PORTAL_CLIENT = {
@@ -55,6 +55,10 @@ SSO_PORTAL_CLIENT = {
     'CLIENT_SECRET': env('SSO_CLIENT_SECRET'),
 }
 SOCIALACCOUNT_PROVIDERS = {'openid_connect': provider_config()}
+# Stable, collision-free RP-local usernames on new signups — see "Stable
+# usernames" below. Optional but recommended; without it allauth's stock
+# adapter seeds usernames from the mutable `preferred_username` claim.
+SOCIALACCOUNT_ADAPTER = 'sso_portal_client.adapters.SocialAccountAdapter'
 ```
 
 `SERVER_URL` is the issuer base URL (allauth appends
@@ -111,6 +115,7 @@ login revokes it. No role models, no claim parsing, no custom decorators.
 | `POST_LOGOUT_REDIRECT_URL` | `None` | Absolute URL for RP-initiated logout (see "Log out everywhere"); `None` omits `post_logout_redirect_uri` |
 | `STATIC_ORIGIN` | `None` | Origin serving the portal's `/static/js/switch*.js` (see "Embedding the store-switch widget"); `None` reuses `SERVER_URL`'s origin |
 | `SESSION_CUTOFF_TIME` | `'00:00'` | Local time-of-day (`'HH:MM'`, per `TIME_ZONE`) at which portal-established sessions expire — see "Day-scoped sessions"; `None` disables the cutoff |
+| `USERNAME_STRATEGY` | `'sub_at_issuer'` | New-signup username scheme, see "Stable usernames" below; requires `SOCIALACCOUNT_ADAPTER = 'sso_portal_client.adapters.SocialAccountAdapter'` to take effect. `'preferred_username'` keeps allauth's stock (mutable, dedupe-prone) behavior |
 
 ### `GROUP_PREFIX` semantics
 
@@ -272,6 +277,59 @@ serve `/static/`). The CDN serves those files `Cache-Control: public,
 max-age=300` and invalidates on portal deploys, so the URL is stable — no
 cache-busting query string needed.
 
+## Stable usernames (`USERNAME_STRATEGY`)
+
+Stock allauth seeds a new social signup's `User.username` from the
+`preferred_username` claim (`DefaultSocialAccountAdapter.populate_user`) —
+a live, mutable snapshot of the portal's own username field. Two problems
+follow: it can collide with an existing RP row (allauth's dedupe then mints
+a `name1`/`name2`-style suffix, silently), and after a portal-side rename
+the same portal user can land a *different* RP username on a fresh device,
+or an old RP username row can quietly become some other portal user's after
+the original renames away.
+
+Wiring `SOCIALACCOUNT_ADAPTER = 'sso_portal_client.adapters.SocialAccountAdapter'`
+(see "Settings" above) switches new signups to `USERNAME_STRATEGY =
+'sub_at_issuer'` (the default): the RP-local username becomes
+`{sub}@{issuer-host}` — e.g. `3f7a9c2e-1c2b-4b7a-9d3e-9a1b2c3d4e5f@portal.example.com`
+(`issuer-host` is derived from `SERVER_URL`, no separate setting). Because
+the portal's `sub` is immutable and globally unique per account, this value
+is:
+
+- **Stable** — the same portal user always gets the same RP username, for
+  the life of the account.
+- **Collision-free** — two different portal users can never be assigned the
+  same RP username; the numeric-suffix dedupe path never fires.
+- **Rename-proof** — a portal-side profile rename never reassigns or
+  orphans an RP username.
+
+Set `USERNAME_STRATEGY = 'preferred_username'` to keep allauth's stock
+behavior instead (e.g. if you already depend on the RP username matching
+the portal's).
+
+**This only affects users created after you adopt it** — existing rows keep
+whatever username they were given at signup; there is no migration to run
+and no reason to touch already-provisioned accounts.
+
+Two things to get right in your own templates/views once usernames stop
+being human-readable:
+
+- **Display code must call `user.get_full_name()`, never `user.username`.**
+  `populate_user` still maps `name`/`given_name`/`family_name` onto
+  `first_name`/`last_name` exactly as stock allauth does — this package only
+  overrides the username field. See `example_project/store/views.py` /
+  `templates/store/index.html` for the pattern (full name, falling back to
+  the portal's own `preferred_username` claim via `get_claim()`, and only
+  then to `user.username`, so a signed-in page never shows the raw
+  identifier).
+- **The store-switch widget is unaffected, but only if you read
+  `currentUser.username` from the claim, not from `user.username`.** The
+  widget self-matches against `/switch/api/users/`, which lists *portal-side*
+  usernames — always the `preferred_username` claim, regardless of this
+  setting. Thread `get_claim(request.user, 'preferred_username')` into
+  `currentUser.username` (again, see the example project), not the RP-local
+  `user.username` field.
+
 ## `claims_synced` signal
 
 Fired after every group sync with the merged claims (userinfo + id_token;
@@ -301,7 +359,12 @@ def map_role(sender, user, claims, **kwargs):
   session — it kills the session, not a single permission, but it bounds
   how long a since-revoked user keeps acting on stale permissions.
 - Key your own records on the `sub` claim (stable), not
-  `preferred_username`/`email` (both mutable).
+  `preferred_username`/`email` (both mutable). With the default
+  `USERNAME_STRATEGY = 'sub_at_issuer'` (see "Stable usernames" above),
+  `user.username` itself is now `sub`-derived and safe to key on too — but
+  it is *not* a display name (use `get_full_name()`) and it is *not* the
+  portal's own username (use the `preferred_username` claim for anything
+  that must match the portal's directory, e.g. the switch widget).
 
 ## SampleStore (Django) example
 
