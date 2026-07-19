@@ -110,6 +110,7 @@ login revokes it. No role models, no claim parsing, no custom decorators.
 | `SUPERUSER_GROUPS` | `[]` | Same for `is_superuser` |
 | `POST_LOGOUT_REDIRECT_URL` | `None` | Absolute URL for RP-initiated logout (see "Log out everywhere"); `None` omits `post_logout_redirect_uri` |
 | `STATIC_ORIGIN` | `None` | Origin serving the portal's `/static/js/switch*.js` (see "Embedding the store-switch widget"); `None` reuses `SERVER_URL`'s origin |
+| `SESSION_CUTOFF_TIME` | `'00:00'` | Local time-of-day (`'HH:MM'`, per `TIME_ZONE`) at which portal-established sessions expire — see "Day-scoped sessions"; `None` disables the cutoff |
 
 ### `GROUP_PREFIX` semantics
 
@@ -122,6 +123,32 @@ login revokes it. No role models, no claim parsing, no custom decorators.
 Use `None` when the portal is your only identity/authorization source. Use
 a prefix when your app also manages its own local groups and only a
 namespace (e.g. `myapp-admin`, `myapp-users`) belongs to the portal.
+
+### Day-scoped sessions (`SESSION_CUTOFF_TIME`)
+
+The portal's store model is day-scoped — enrollment is per calendar day and
+the quick-switch lists are "today's" people — and the portal's own session
+dies overnight (2-hour sliding idle timeout). An RP session established from
+a portal login would otherwise live for Django's `SESSION_COOKIE_AGE` (two
+weeks by default), so a station left signed in on Friday still greeted the
+Monday shift as Friday's user.
+
+On every portal login this package therefore sets the session to expire at
+the **next local `SESSION_CUTOFF_TIME`** (default midnight): whenever the
+login happens, the session never crosses into the next business day. Pair it
+with the switch widget's `sessionPingUrl` guard — when the station wakes up
+past the cutoff, the first ping returns 401 and the widget locks the page
+straight into the sign-in flow.
+
+Notes:
+
+- Only **portal** logins are touched; local/other-provider logins keep
+  Django's default session age.
+- Set e.g. `'04:00'` if late shifts run past midnight, or `None` to opt out
+  and manage `SESSION_COOKIE_AGE` yourself.
+- Do **not** enable `SESSION_SAVE_EVERY_REQUEST` — the widget's session-ping
+  contract requires it off (see "Session ping"), and the cutoff makes
+  sliding-idle unnecessary here anyway.
 
 ### `STAFF_GROUPS` / `SUPERUSER_GROUPS`
 

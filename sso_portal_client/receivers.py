@@ -24,9 +24,12 @@ appear only in the id_token. ``SocialLogin.lookup()`` overwrites
 """
 
 import logging
+from datetime import timedelta
 from typing import Any
 
-from sso_portal_client.conf import PROVIDER_ID
+from django.utils import timezone
+
+from sso_portal_client.conf import PROVIDER_ID, session_cutoff_time
 from sso_portal_client.models import PortalSession
 from sso_portal_client.signals import claims_synced
 from sso_portal_client.sync import sync_user_groups
@@ -71,12 +74,36 @@ def _record_portal_session(request: Any, user: Any, claims: dict[str, Any]) -> N
     )
 
 
+def _bound_session_to_cutoff(request: Any) -> None:
+    """Expire this session at the next local SESSION_CUTOFF_TIME.
+
+    The portal's store model is day-scoped (per-day enrollment, "today's"
+    quick-switch lists), and the portal's own session dies overnight (2h
+    sliding idle) — but an RP session established from it would otherwise
+    live for Django's SESSION_COOKIE_AGE (two weeks by default), so the
+    morning shift found the station still "signed in" as yesterday's user.
+    Binding the expiry to the next cutoff keeps the RP session inside the
+    business day it was created in; the widget's session-ping guard then
+    locks the page the moment the station wakes up past the cutoff.
+    """
+    cutoff = session_cutoff_time()
+    session = getattr(request, 'session', None)
+    if cutoff is None or session is None:
+        return
+    now = timezone.localtime()
+    expires_at = now.replace(hour=cutoff.hour, minute=cutoff.minute, second=0, microsecond=0)
+    if expires_at <= now:
+        expires_at += timedelta(days=1)
+    session.set_expiry(expires_at)
+
+
 def _handle_portal_login(request: Any, user: Any, sociallogin: Any) -> None:
     if sociallogin is None or sociallogin.account.provider != PROVIDER_ID:
         return
     claims = _extract_claims(sociallogin)
     sync_user_groups(user, claims)
     _record_portal_session(request, user, claims)
+    _bound_session_to_cutoff(request)
     claims_synced.send(sender=None, user=user, claims=claims)
 
 
