@@ -13,11 +13,13 @@ An RP configures the whole package through a single settings dict::
         'STATIC_ORIGIN': None,   # origin serving the portal's /static/js/*; None => SERVER_URL's origin
         'SESSION_CUTOFF_TIME': '00:00',  # local time-of-day sessions die at; None disables
         'USERNAME_STRATEGY': 'sub_at_issuer',  # or 'preferred_username'; see adapters.py
+        'SET_COOP_HEADER': True,  # PortalSwitchMiddleware sets the popup-friendly COOP header
     }
 """
 
 import datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from django.conf import settings as django_settings
 from django.core.exceptions import ImproperlyConfigured
@@ -54,6 +56,7 @@ _DEFAULTS: dict[str, Any] = {
     'STATIC_ORIGIN': None,
     'SESSION_CUTOFF_TIME': '00:00',
     'USERNAME_STRATEGY': 'sub_at_issuer',
+    'SET_COOP_HEADER': True,
 }
 
 _REQUIRED = ('SERVER_URL', 'CLIENT_ID')
@@ -129,6 +132,38 @@ def discovery_url() -> str:
     if '/.well-known/' not in url:
         url += '/.well-known/openid-configuration'
     return url
+
+
+def portal_origin() -> str:
+    """The portal's APP origin (``scheme://host[:port]``), derived from
+    ``SERVER_URL`` (the issuer, e.g. ``.../o``).
+
+    This is what the switch widget talks to at runtime (``portalOrigin``,
+    the login URL, the switch popup) — it must stay the app origin even in
+    production, where it differs from ``static_origin()`` below. Was
+    duplicated per-RP as ``_portal_origin()`` before the widget integration
+    kit (``middleware.py`` / ``templatetags/sso_portal_client.py``) centralized
+    it here.
+    """
+    parsed = urlsplit(get_settings()['SERVER_URL'])
+    return f'{parsed.scheme}://{parsed.netloc}'
+
+
+def static_origin() -> str:
+    """Origin serving the portal's static JS (``switch-widget.js``).
+
+    Defaults to :func:`portal_origin`, which is correct in development where
+    the portal's runserver serves ``/static/`` from the app origin itself.
+    In production the portal's app origin serves no ``/static/`` at all
+    (static assets live on a separate CDN domain — the portal's
+    ``STATIC_URL``), so deployments there must set
+    ``SSO_PORTAL_CLIENT['STATIC_ORIGIN']`` to that CDN origin.
+    """
+    override = get_settings()['STATIC_ORIGIN']
+    if not override:
+        return portal_origin()
+    parsed = urlsplit(override)
+    return f'{parsed.scheme}://{parsed.netloc}'
 
 
 def provider_config() -> dict[str, Any]:

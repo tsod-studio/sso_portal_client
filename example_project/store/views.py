@@ -5,85 +5,33 @@ The point of the demo: ``/admin-area/`` is gated with a stock
 group name. The ``store.view_admin_area`` permission reaches a user purely
 because ``sso_portal_client`` synced them into the ``samplestore-admin`` group
 (which owns that permission — see ``migrations/0002_admin_group.py``).
-"""
 
-from urllib.parse import urlparse
+The store-switch widget's COOP header, ``currentUser``, static/app origins,
+and login URL used to be hand-rolled here (see git history pre-widget-
+integration-kit for the old ``_portal_origin``/``_portal_static_origin``
+helpers and the manual ``json_script`` plumbing in ``index.html``) — that
+whole error-prone surface is now ``sso_portal_client.middleware.
+PortalSwitchMiddleware`` (COOP + ``request.portal_user``, wired in
+``config/settings.py``) plus the ``{% portal_switch_widget %}`` tag, mounted
+once, site-wide, in ``templates/store/base.html``. This view only supplies
+what the widget's config can't derive: nothing, now — it is pure Django
+authorization.
+"""
 
 from django.contrib.auth.decorators import login_required, permission_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from sso_portal_client.claims import get_claim
-from sso_portal_client.conf import get_settings
-
 ADMIN_PERMISSION = 'store.view_admin_area'
-
-
-def _portal_origin() -> str:
-    """Portal APP origin (scheme://host[:port]) for the store-switch widget,
-    derived from SSO_PORTAL_CLIENT['SERVER_URL'] (the issuer, e.g. .../o).
-
-    Used for everything the widget talks to at runtime (portalOrigin, the
-    login URL, the switch popup) — this must stay the app origin even in
-    production, where it differs from the static origin below.
-    """
-    parsed = urlparse(get_settings()['SERVER_URL'])
-    return f'{parsed.scheme}://{parsed.netloc}'
-
-
-def _portal_static_origin() -> str:
-    """Origin serving the portal's static JS (switch.js / switch-widget.js).
-
-    Defaults to ``_portal_origin()``, which is correct in development where
-    the portal's runserver serves ``/static/`` from the app origin itself.
-    In production the portal's app origin serves no ``/static/`` at all
-    (static assets live on a separate CDN domain — the portal's
-    ``STATIC_URL``), so deployments there must set
-    ``SSO_PORTAL_CLIENT['STATIC_ORIGIN']`` to that CDN origin.
-    """
-    override = get_settings()['STATIC_ORIGIN']
-    if not override:
-        return _portal_origin()
-    parsed = urlparse(override)
-    return f'{parsed.scheme}://{parsed.netloc}'
 
 
 def index(request: HttpRequest) -> HttpResponse:
     """Landing page: login state + the user's synced groups and flags."""
-    context: dict[str, object] = {
-        'portal_origin': _portal_origin(),
-        'portal_static_origin': _portal_static_origin(),
-    }
+    context: dict[str, object] = {}
     if request.user.is_authenticated:
         context['group_names'] = sorted(request.user.groups.values_list('name', flat=True))
         context['admin_permission'] = ADMIN_PERMISSION
-        # Claims the portal issued at login live in SocialAccount.extra_data
-        # (JSON) — read on demand via the package helper, no RP columns needed.
-        # ``picture``: LINE avatar for the widget badge (initials fallback).
-        # ``locale``: the user's saved portal UI language, for the widget's
-        # currentUser.locale.
-        context['portal_picture'] = get_claim(request.user, 'picture')
-        context['portal_locale'] = get_claim(request.user, 'locale')
-        # ``preferred_username``: the portal's OWN username for this person —
-        # NOT the same thing as the RP-local `user.username` field (which,
-        # under USERNAME_STRATEGY='sub_at_issuer', is now a `{sub}@{host}`
-        # identifier, not a display name). The widget's self-match against
-        # its "who's enrolled today" list (`/switch/api/users/`, portal-side
-        # usernames) needs the portal's own username here, not this app's
-        # local one — see README "Stable usernames".
-        context['portal_username'] = get_claim(request.user, 'preferred_username')
-    response = render(request, 'store/index.html', context)
-    # The store-switch popup posts its ``sso:switched`` result back through
-    # ``window.opener``. Django's SecurityMiddleware defaults every response to
-    # ``Cross-Origin-Opener-Policy: same-origin``, which severs that opener for
-    # the cross-origin portal popup — the message never arrives and the switch
-    # silently fails (the page stays as it was, needing a second manual login
-    # click). ``same-origin-allow-popups`` keeps this page isolated from being
-    # opened BY others while still letting the popups IT opens keep their
-    # opener. Any RP embedding the switch button/widget must do the same; see
-    # static/js/switch.js's POPUP OPENER REQUIREMENT note on the portal.
-    response['Cross-Origin-Opener-Policy'] = 'same-origin-allow-popups'
-    return response
+    return render(request, 'store/index.html', context)
 
 
 @login_required

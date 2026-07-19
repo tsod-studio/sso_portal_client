@@ -92,79 +92,102 @@ class IndexTests(TestCase):
 
 
 class SwitchWiringTests(TestCase):
-    """The store-switch popup handshake requirements on the RP page."""
+    """The store-switch widget's requirements on the RP page — now covered by
+    ``PortalSwitchMiddleware`` (``config/settings.py``) and
+    ``{% portal_switch_widget %}`` (mounted once, site-wide, in
+    ``store/base.html``) instead of hand-rolled per-view code. See git
+    history predating the widget integration kit for the old
+    ``_portal_origin``/``_portal_static_origin`` helpers and manual
+    ``json_script`` plumbing this replaced.
+    """
 
     def test_index_sends_popup_friendly_coop(self) -> None:
         # Without this, Django's SecurityMiddleware default (same-origin) would
         # sever window.opener in the cross-origin switch popup and the
         # sso:switched message would never reach this page (the switch would
         # silently fail, needing a second manual login click).
+        # Set by PortalSwitchMiddleware now, not the view.
         response = self.client.get(reverse('store:index'))
         self.assertEqual(response['Cross-Origin-Opener-Policy'], 'same-origin-allow-popups')
 
-    def test_anonymous_index_mounts_widget_in_anonymous_mode(self) -> None:
+    def test_widget_mounts_on_every_page(self) -> None:
+        # Mounted once in store/base.html -> present on the 403 page too, not
+        # just the index (the badge is meant to be site-wide).
         response = self.client.get(reverse('store:index'))
         self.assertContains(response, 'switch-widget.js')
-        self.assertContains(response, 'PortalSwitchWidget.init')
-        # No currentUser is threaded on the logged-out page (anonymous mode).
-        self.assertNotContains(response, 'currentUser')
-        # The plain switch.js button stays as the minimal-integration reference.
-        self.assertContains(response, 'data-portal-switch')
+        self.assertContains(response, 'PortalSwitchWidget.init(')
+        # switch.js (the standalone data-portal-switch button) is retired:
+        # the widget's own dropdown already offers "Switch to" + sign-in, so
+        # keeping a second, separately-initialized button/script would just
+        # duplicate it once every page mounts the widget via one tag.
+        self.assertNotContains(response, 'switch.js"')
 
-    def test_authenticated_index_threads_the_portal_picture(self) -> None:
+    def test_anonymous_index_mounts_widget_in_anonymous_mode(self) -> None:
+        response = self.client.get(reverse('store:index'))
+        # request.portal_user is None on an anonymous page -> currentUser is
+        # JSON null (anonymous-mode widget), not a currentUser object.
+        self.assertContains(response, '>null</script>')
+
+    def test_local_account_also_mounts_widget_in_anonymous_mode(self) -> None:
+        # A signed-in user with no linked sso_portal SocialAccount is not
+        # portal-backed (shouldn't occur under this demo's SOCIALACCOUNT_ONLY,
+        # but PortalSwitchMiddleware must still degrade to anonymous mode
+        # rather than ever leaking a local user.username into currentUser —
+        # the exact bug this integration kit exists to prevent).
+        frank = User.objects.create_user(username='frank')
+        self.client.force_login(frank)
+        response = self.client.get(reverse('store:index'))
+        # The widget's currentUser JSON is null, not `{"username": "frank", ...}`
+        # — 'frank' legitimately appears elsewhere on the page (the "Signed in
+        # as" fallback text), just never inside the widget's own payload.
+        current_user_script = '<script id="sso-portal-client-current-user" type="application/json">null</script>'
+        self.assertContains(response, current_user_script)
+
+    def test_authenticated_index_threads_the_portal_claims(self) -> None:
         dave = User.objects.create_user(username='dave', first_name='Dave', last_name='Lin')
         SocialAccount.objects.create(
             user=dave,
             provider='sso_portal',
             uid='dave-uid',
-            extra_data={'id_token': {'picture': 'https://line.example/dave.jpg'}},
+            extra_data={
+                'id_token': {
+                    'preferred_username': 'dave-portal',
+                    'picture': 'https://line.example/dave.jpg',
+                    'locale': 'zh-hant',
+                }
+            },
         )
         self.client.force_login(dave)
         response = self.client.get(reverse('store:index'))
-        self.assertContains(response, 'portal-picture')
+        self.assertContains(response, 'dave-portal')
         self.assertContains(response, 'https://line.example/dave.jpg')
-
-    def test_authenticated_index_threads_the_portal_locale(self) -> None:
-        eve = User.objects.create_user(username='eve', first_name='Eve', last_name='Lin')
-        SocialAccount.objects.create(
-            user=eve,
-            provider='sso_portal',
-            uid='eve-uid',
-            extra_data={'id_token': {'locale': 'zh-hant'}},
-        )
-        self.client.force_login(eve)
-        response = self.client.get(reverse('store:index'))
-        self.assertContains(response, 'portal-locale')
         self.assertContains(response, 'zh-hant')
 
 
 class StaticOriginTests(TestCase):
-    """`_portal_static_origin` (STATIC_ORIGIN) governs the widget script src.
-
-    `portalOrigin` (the app origin, SERVER_URL) must stay untouched — only
-    the `<script src>` tags loading switch.js/switch-widget.js move to the
+    """``STATIC_ORIGIN`` (read via ``conf.static_origin()``) governs the
+    widget's ``<script src>``; ``conf.portal_origin()`` (the app origin,
+    ``SERVER_URL``) must stay untouched — only the script tag moves to the
     static/CDN origin in production.
     """
 
     def test_defaults_to_the_app_origin(self) -> None:
         # No STATIC_ORIGIN configured (the example project's default settings):
-        # the script tags fall back to the same origin as portalOrigin, which
+        # the script tag falls back to the same origin as portalOrigin, which
         # is what makes the portal's runserver-served /static/ work in dev
         # with zero extra config.
         response = self.client.get(reverse('store:index'))
-        self.assertContains(response, 'src="http://127.0.0.1:8000/static/js/switch.js"')
         self.assertContains(response, 'src="http://127.0.0.1:8000/static/js/switch-widget.js"')
 
     @override_settings(
         SSO_PORTAL_CLIENT={**django_settings.SSO_PORTAL_CLIENT, 'STATIC_ORIGIN': 'https://static.portal.example'}
     )
-    def test_static_origin_override_moves_only_the_script_tags(self) -> None:
+    def test_static_origin_override_moves_only_the_script_tag(self) -> None:
         response = self.client.get(reverse('store:index'))
-        self.assertContains(response, 'src="https://static.portal.example/static/js/switch.js"')
         self.assertContains(response, 'src="https://static.portal.example/static/js/switch-widget.js"')
-        # portalOrigin (the json_script'd value PortalSwitch.init/
-        # PortalSwitchWidget.init read at runtime) must still be the app
-        # origin, not the static override — only the script src tags move.
+        # portalOrigin (what PortalSwitchWidget.init reads at runtime) must
+        # still be the app origin, not the static override — only the
+        # script src tag moves.
         self.assertContains(response, '>"http://127.0.0.1:8000"</script>')
         self.assertNotContains(response, 'static.portal.example</script>')
 

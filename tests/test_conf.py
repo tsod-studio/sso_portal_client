@@ -8,8 +8,10 @@ from sso_portal_client.conf import (
     PROVIDER_ID,
     discovery_url,
     get_settings,
+    portal_origin,
     provider_config,
     session_cutoff_time,
+    static_origin,
     username_strategy,
 )
 
@@ -24,6 +26,7 @@ def test_defaults_merged():
     assert cfg['SUPERUSER_GROUPS'] == []
     assert cfg['STATIC_ORIGIN'] is None
     assert cfg['USERNAME_STRATEGY'] == 'sub_at_issuer'
+    assert cfg['SET_COOP_HEADER'] is True
 
 
 @override_settings(SSO_PORTAL_CLIENT={'CLIENT_ID': 'x'})
@@ -106,6 +109,27 @@ class TestSessionCutoffTime:
     def test_invalid_value_raises(self):
         with pytest.raises(ImproperlyConfigured, match='SESSION_CUTOFF_TIME'):
             session_cutoff_time()
+
+
+class TestPortalOrigin:
+    def test_default_is_server_url_origin(self):
+        assert portal_origin() == 'http://127.0.0.1:8000'
+
+    def test_static_origin_defaults_to_portal_origin(self):
+        assert static_origin() == portal_origin() == 'http://127.0.0.1:8000'
+
+    @override_settings(
+        SSO_PORTAL_CLIENT={
+            'SERVER_URL': 'http://portal.test/o',
+            'CLIENT_ID': 'x',
+            'STATIC_ORIGIN': 'https://static.portal.example/some/path',
+        }
+    )
+    def test_static_origin_override_is_origin_only(self):
+        # portal_origin() is untouched by STATIC_ORIGIN.
+        assert portal_origin() == 'http://portal.test'
+        # static_origin() strips STATIC_ORIGIN down to scheme://host[:port].
+        assert static_origin() == 'https://static.portal.example'
 
 
 class TestUsernameStrategy:

@@ -9,6 +9,12 @@ Public API:
   ``SOCIALACCOUNT_ADAPTER`` to get stable, collision-free RP-local
   usernames (``USERNAME_STRATEGY``) on new portal signups.
 - ``sso_portal_client.signals.claims_synced`` — fired after every group sync.
+- ``sso_portal_client.middleware.PortalSwitchMiddleware`` +
+  ``sso_portal_client.context_processors.portal_user`` +
+  ``{% load sso_portal_client %}{% portal_switch_widget %}`` — the switch
+  widget integration kit (COOP header, ``request.portal_user``, and the
+  widget's ``<script>``/``init()`` wiring in one tag). See README "Two-line
+  widget integration".
 """
 
 from sso_portal_client.conf import provider_config

@@ -47,6 +47,11 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'allauth.account.middleware.AccountMiddleware',
+    # AFTER SecurityMiddleware (required — see PortalSwitchMiddleware's
+    # docstring for why the popup-friendly COOP header depends on this
+    # position, verified against the installed Django's response-phase
+    # ordering).
+    'sso_portal_client.middleware.PortalSwitchMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -61,6 +66,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'sso_portal_client.context_processors.portal_user',
             ],
         },
     }

@@ -116,6 +116,7 @@ login revokes it. No role models, no claim parsing, no custom decorators.
 | `STATIC_ORIGIN` | `None` | Origin serving the portal's `/static/js/switch*.js` (see "Embedding the store-switch widget"); `None` reuses `SERVER_URL`'s origin |
 | `SESSION_CUTOFF_TIME` | `'00:00'` | Local time-of-day (`'HH:MM'`, per `TIME_ZONE`) at which portal-established sessions expire — see "Day-scoped sessions"; `None` disables the cutoff |
 | `USERNAME_STRATEGY` | `'sub_at_issuer'` | New-signup username scheme, see "Stable usernames" below; requires `SOCIALACCOUNT_ADAPTER = 'sso_portal_client.adapters.SocialAccountAdapter'` to take effect. `'preferred_username'` keeps allauth's stock (mutable, dedupe-prone) behavior |
+| `SET_COOP_HEADER` | `True` | Whether `PortalSwitchMiddleware` sets the popup-friendly `Cross-Origin-Opener-Policy: same-origin-allow-popups` header — see "Two-line widget integration"; `False` opts out entirely (e.g. an RP managing COOP itself) |
 
 ### `GROUP_PREFIX` semantics
 
@@ -261,21 +262,123 @@ your session self-renewing forever (see the docstring on
 `sso_portal_client.views.session_ping`, which mirrors the portal's Flask
 reference RP). Consequently, do not enable `SESSION_SAVE_EVERY_REQUEST`.
 
-## Embedding the store-switch widget
+## Two-line widget integration
 
-The portal's switch widget ships as two plain `<script src>` tags
-(`switch.js` + `switch-widget.js`, see `example_project/store/templates/
-store/index.html`). `portalOrigin` passed into `PortalSwitch.init()` /
-`PortalSwitchWidget.init()` must always be the portal's **app** origin (the
-`SERVER_URL` origin) — that's what the widget talks to at runtime (login
-URL, switch popup). But in production the app origin serves no `/static/`
-at all; the portal's static assets live on a separate CDN domain
-(`STATIC_URL`). Point the `<script src>` tags there via
-`SSO_PORTAL_CLIENT['STATIC_ORIGIN']` (default `None` reuses `SERVER_URL`'s
-origin, which is correct in development where the portal's runserver does
-serve `/static/`). The CDN serves those files `Cache-Control: public,
-max-age=300` and invalidates on portal deploys, so the URL is stable — no
-cache-busting query string needed.
+Every RP embedding the portal's switch widget used to hand-roll five
+error-prone pieces: the COOP header per view, `currentUser` threaded from
+claims (easy to get wrong — see the warning below), the app/static origin
+split, `sessionPingUrl` wiring, and the login URL. This package now does all
+of it for two settings lines and one template tag:
+
+```python
+MIDDLEWARE = [
+    # ...
+    'django.middleware.security.SecurityMiddleware',
+    # ...
+    'sso_portal_client.middleware.PortalSwitchMiddleware',   # AFTER SecurityMiddleware
+]
+
+TEMPLATES = [
+    {
+        # ...
+        'OPTIONS': {
+            'context_processors': [
+                # ...
+                'sso_portal_client.context_processors.portal_user',
+            ],
+        },
+    }
+]
+```
+
+```django+html
+{% load sso_portal_client %}
+{% portal_switch_widget %}
+```
+
+That's it — put the tag once in your base template and every page mounts the
+floating switch-widget badge, in the right mode (signed-in or anonymous)
+automatically.
+
+**MIDDLEWARE ordering is not optional.** `PortalSwitchMiddleware` must sit
+**after** `django.middleware.security.SecurityMiddleware` (closer to the
+view / later in the list). Verified against the installed Django
+(`django/middleware/security.py`): `SecurityMiddleware` sets the COOP header
+with `response.setdefault(...)` — it never overwrites an already-set value —
+and Django runs `process_response` in the *reverse* of `MIDDLEWARE`'s order
+(the entry closest to the view unwinds first). Placed after
+`SecurityMiddleware`, `PortalSwitchMiddleware`'s own `response.setdefault(...)`
+call runs *first* on the way out, so it wins the race against
+`SecurityMiddleware`'s `same-origin` default — while a view that explicitly
+sets its own COOP header before returning is still never overwritten by
+either middleware (`setdefault` always yields to whatever is already there).
+Get the order backwards and `SecurityMiddleware`'s `same-origin` default
+wins instead, which silently breaks the switch popup handshake (see
+`middleware.py`'s module docstring for the full account).
+
+**Why COOP matters at all**: the switch popup posts its result back through
+`window.opener`. Django's `SecurityMiddleware` defaults every response to
+`Cross-Origin-Opener-Policy: same-origin`, which severs that opener for the
+cross-origin portal popup — the message never arrives and the switch
+silently fails (the page just stays as it was, needing a second manual login
+click). `same-origin-allow-popups` keeps the page isolated from being opened
+*by* others while still letting popups *it* opens keep their opener.
+Opt out entirely with `SSO_PORTAL_CLIENT['SET_COOP_HEADER'] = False` (e.g. an
+RP that already sets its own COOP policy globally and never wants this
+middleware to touch the header).
+
+`{% portal_switch_widget %}` takes two optional kwargs mapping straight onto
+the widget's own options — `require_session` (bool) and `strategy` (str,
+`'auto'`/`'popup'`/`'redirect'`):
+
+```django+html
+{% portal_switch_widget require_session=True strategy="redirect" %}
+```
+
+The tag deliberately does not mirror every `PortalSwitchWidget.init()`
+option (`mount`, `zIndex`, `texts`, `features`, `lang`, ...; see
+`switch-widget.js`'s own docstring on the portal for the full list) — an RP
+that needs one of those keeps hand-initializing the widget directly, exactly
+as before. What the tag always supplies, safely `json_script`-encoded (never
+raw string interpolation of request/claim-derived values into inline JS):
+`portalOrigin`/the script's origin (`SERVER_URL` / `STATIC_ORIGIN`, see
+below), `loginUrl` (allauth's provider login URL, `process=login` plus
+`next=<current path>` so a switch or sign-in lands the browser back where it
+started), `currentUser` (from `request.portal_user` — `null` on an
+anonymous *or* non-portal-backed page, mounting the widget in anonymous
+mode), and `sessionPingUrl` (reversed from this package's own endpoint).
+
+**Migrating from a hand-rolled `PortalSwitchWidget.init()` call**: delete the
+per-view COOP header assignment, the `json_script`'d `portal_origin`/
+`portal_username`/`portal_picture`/`portal_locale` context variables, the
+`<script src>` tags, and the inline `PortalSwitchWidget.init({...})` call;
+add the two `MIDDLEWARE`/`TEMPLATES` lines above and `{% portal_switch_widget %}`
+in your base template. If you were threading `user.username` into
+`currentUser` — the classic bug this kit exists to prevent (a local
+`user.username`, e.g. a `{sub}@{issuer-host}` value under the default
+`USERNAME_STRATEGY`, is not the portal's own identity, and showing it where
+the portal's own username belongs — e.g. a "switch to" tile matching
+*against* the portal's directory — is simply wrong) — `request.portal_user`
+already reads the correct `preferred_username` claim for you. See
+`example_project/store/` (`views.py`, `templates/store/base.html`,
+`config/settings.py`) for the before/after in a real app.
+
+### Custom integrations (bypassing the tag)
+
+The portal's switch widget ships as a plain `<script src>` tag
+(`switch-widget.js`) plus a `PortalSwitchWidget.init({...})` call — see that
+script's own docstring on the portal for every option. `portalOrigin` must
+always be the portal's **app** origin (the `SERVER_URL` origin) — that's
+what the widget talks to at runtime (login URL, switch popup). But in
+production the app origin serves no `/static/` at all; the portal's static
+assets live on a separate CDN domain (`STATIC_URL`). Point the `<script
+src>` tag there via `SSO_PORTAL_CLIENT['STATIC_ORIGIN']` (default `None`
+reuses `SERVER_URL`'s origin, which is correct in development where the
+portal's runserver does serve `/static/`) — `sso_portal_client.conf.
+static_origin()` / `portal_origin()` compute exactly this split and are what
+`{% portal_switch_widget %}` itself calls. The CDN serves those files
+`Cache-Control: public, max-age=300` and invalidates on portal deploys, so
+the URL is stable — no cache-busting query string needed.
 
 ## Stable usernames (`USERNAME_STRATEGY`)
 
@@ -388,11 +491,14 @@ What it demonstrates:
 - A custom 403 page lists the user's current groups and explains that access
   derives from SSO group membership → Django permission.
 
-- The index page also wires the portal's in-store fast-switch integration
-  (`switch.js` button + `switch-widget.js` badge), pointing the widget's
-  session guard at the package's read-only `/sso/session-ping/`. Combined
-  with the back-channel logout receiver, switching users in the portal popup
-  kills this app's old session and re-enters the OIDC flow as the new user.
+- `store/base.html` mounts the portal's in-store fast-switch widget site-wide
+  via `{% portal_switch_widget %}` (see "Two-line widget integration" above)
+  — `PortalSwitchMiddleware` (`config/settings.py`) supplies the COOP header
+  and `request.portal_user`, and the tag's `sessionPingUrl` points the
+  widget's session guard at the package's read-only `/sso/session-ping/`.
+  Combined with the back-channel logout receiver, switching users in the
+  portal popup kills this app's old session and re-enters the OIDC flow as
+  the new user.
   Prerequisites are the portal's store-switch demo data (`setup_switch_demo`:
   Demo Store at `127.0.0.1`, PINs `1234`/`5678`) and a full portal login by
   each switch target **today** (daily enrollment).

@@ -1,0 +1,31 @@
+{# Rendered by {% portal_switch_widget %} (templatetags/sso_portal_client.py). #}
+{# Every value below is JSON-encoded via json_script (no raw string          #}
+{# interpolation of request/claim-derived data into the inline script).      #}
+{{ portal_origin|json_script:"sso-portal-client-portal-origin" }}
+{{ login_url|json_script:"sso-portal-client-login-url" }}
+{{ current_user|json_script:"sso-portal-client-current-user" }}
+{{ session_ping_url|json_script:"sso-portal-client-session-ping-url" }}
+{{ require_session|json_script:"sso-portal-client-require-session" }}
+{{ strategy|json_script:"sso-portal-client-strategy" }}
+<script src="{{ static_origin }}/static/js/switch-widget.js"></script>
+<script>
+  (function () {
+    var portalOrigin = JSON.parse(document.getElementById('sso-portal-client-portal-origin').textContent);
+    var loginUrl = JSON.parse(document.getElementById('sso-portal-client-login-url').textContent);
+    var currentUser = JSON.parse(document.getElementById('sso-portal-client-current-user').textContent);
+    var sessionPingUrl = JSON.parse(document.getElementById('sso-portal-client-session-ping-url').textContent);
+    var requireSession = JSON.parse(document.getElementById('sso-portal-client-require-session').textContent);
+    var strategy = JSON.parse(document.getElementById('sso-portal-client-strategy').textContent);
+    var options = {
+      portalOrigin: portalOrigin,
+      loginUrl: loginUrl,
+      currentUser: currentUser,
+      sessionPingUrl: sessionPingUrl,
+      requireSession: requireSession
+    };
+    if (strategy) {
+      options.strategy = strategy;
+    }
+    PortalSwitchWidget.init(options);
+  })();
+</script>

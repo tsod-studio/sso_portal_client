@@ -6,10 +6,15 @@
     {# Display name, never the raw `user.username` field: under the default #}
     {# USERNAME_STRATEGY ('sub_at_issuer') that's now an opaque              #}
     {# `{sub}@{issuer-host}` identifier, not anything a person should see.   #}
-    {# Prefer the full name; fall back to the portal's own preferred_username#}
-    {# claim, and only then to the local username, so this never renders    #}
-    {# blank. #}
-    <p>Signed in as <strong>{{ user.get_full_name|default:portal_username|default:user.username }}</strong>.</p>
+    {# portal_user.name (context processor -> request.portal_user, set by   #}
+    {# PortalSwitchMiddleware) already resolves name -> get_full_name() ->  #}
+    {# preferred_username claim; only a non-portal-backed local account     #}
+    {# falls through to user.username here, so this never renders blank.    #}
+    {# NB: `default:` filter ARGUMENTS don't catch a failed lookup the way  #}
+    {# the filtered value itself does, so `portal_user.username` must never #}
+    {# appear as a filter argument (it can be a SimpleLazyObject wrapping    #}
+    {# None) — only as the top-level filtered value, as below.              #}
+    <p>Signed in as <strong>{{ portal_user.name|default:user.username }}</strong>.</p>
     <ul>
       <li><strong>Django groups</strong> (synced from the portal's <code>groups</code> claim on login):
         {% if group_names %}
@@ -38,57 +43,14 @@
         <button class="button" type="submit">Log out everywhere</button>
       </form>
     </p>
-    <p>
-      {# In-store fast switch (portal's apps.store_switch). The package supplies #}
-      {# the two endpoints the widget needs: the read-only session guard at      #}
-      {# /sso/session-ping/ and the back-channel logout receiver that kills this #}
-      {# RP session when the portal switches users. loginUrl re-enters the OIDC  #}
-      {# flow (SOCIALACCOUNT_LOGIN_ON_GET makes the GET start it directly).      #}
-      <button data-portal-switch type="button">Switch User</button>
+    <p class="muted">
+      {# In-store fast switch (portal's apps.store_switch): the floating     #}
+      {# badge in the corner of every page (mounted once, in store/base.html #}
+      {# via {% portal_switch_widget %}) already offers "Switch to" / sign-in #}
+      {# / leave / log-out-device entries — no separate button needed here.  #}
+      Look for the account badge in the corner to switch users or sign out
+      this device.
     </p>
-    {{ portal_origin|json_script:"portal-origin" }}
-    {# The widget's currentUser.username must be the PORTAL's own username    #}
-    {# (the preferred_username claim) — it self-matches against              #}
-    {# /switch/api/users/, whose entries are portal-side usernames, not this  #}
-    {# app's local `user.username` field (an opaque `{sub}@{host}` value      #}
-    {# under the default USERNAME_STRATEGY, and never guaranteed to equal the #}
-    {# portal's own username even under the legacy strategy after a rename). #}
-    {{ portal_username|default:''|json_script:"portal-username" }}
-    {{ user.get_full_name|default:portal_username|json_script:"portal-name" }}
-    {# `picture` is the portal's standard OIDC avatar claim (a LINE avatar when #}
-    {# the user linked one); the view reads it from the SocialAccount's         #}
-    {# extra_data. The widget falls back to initials when it is empty/missing.  #}
-    {{ portal_picture|default:''|json_script:"portal-picture" }}
-    {# `locale` is the portal's standard OIDC language claim (present when the  #}
-    {# user picked a language in the portal); the widget uses it to choose its  #}
-    {# label language. Empty/missing falls through to defaultLang below.        #}
-    {{ portal_locale|default:''|json_script:"portal-locale" }}
-    <script src="{{ portal_static_origin }}/static/js/switch.js"></script>
-    <script src="{{ portal_static_origin }}/static/js/switch-widget.js"></script>
-    <script>
-      const portalOrigin = JSON.parse(document.getElementById('portal-origin').textContent);
-      const loginUrl = '{% provider_login_url 'sso_portal' process='login' %}';
-      PortalSwitch.init({ portalOrigin: portalOrigin, loginUrl: loginUrl });
-      PortalSwitchWidget.init({
-        portalOrigin: portalOrigin,
-        loginUrl: loginUrl,
-        currentUser: {
-          username: JSON.parse(document.getElementById('portal-username').textContent),
-          name: JSON.parse(document.getElementById('portal-name').textContent),
-          picture: JSON.parse(document.getElementById('portal-picture').textContent) || null,
-          locale: JSON.parse(document.getElementById('portal-locale').textContent) || null
-        },
-        // `appLogoutUrl` adds a "Log out (this app)" entry that ends only this
-        // RP's session (allauth's local logout), demonstrating features.appLogout.
-        appLogoutUrl: '{% url 'account_logout' %}',
-        // `defaultLang` demos the built-in zh-hant label table: the dropdown
-        // renders in Traditional Chinese unless the signed-in portal user has a
-        // saved language preference (currentUser.locale, from the OIDC `locale`
-        // claim), which wins. Use `lang: 'zh-hant'` to pin it regardless.
-        defaultLang: 'zh-hant',
-        sessionPingUrl: '{% url 'sso_portal_client:session_ping' %}'
-      });
-    </script>
   {% else %}
     <p>You are not signed in.</p>
     <p>
@@ -96,24 +58,13 @@
       {# With SOCIALACCOUNT_LOGIN_ON_GET this GET starts the OAuth flow directly. #}
       <a class="button" href="{% provider_login_url 'sso_portal' process='login' %}">Log in via SSO Portal</a>
     </p>
-    <p>
-      {# The switch popup works from an anonymous portal session, so a kiosk #}
-      {# left on this logged-out page (the leave-station flow ends here) can #}
-      {# hand over to the next person via PIN without a full login.          #}
-      <button data-portal-switch type="button">Switch User</button>
+    <p class="muted">
+      {# The floating badge (base.html) mounts in anonymous mode here too — #}
+      {# a kiosk left on this logged-out page (the leave-station flow ends  #}
+      {# here) can still hand over to the next person via PIN without a     #}
+      {# full login, through the badge's "Switch to" list.                  #}
+      Look for the account badge in the corner to switch to another
+      enrolled user without signing in.
     </p>
-    <script src="{{ portal_static_origin }}/static/js/switch.js"></script>
-    <script src="{{ portal_static_origin }}/static/js/switch-widget.js"></script>
-    {{ portal_origin|json_script:"portal-origin-anon" }}
-    <script>
-      const anonPortalOrigin = JSON.parse(document.getElementById('portal-origin-anon').textContent);
-      const anonLoginUrl = '{% provider_login_url 'sso_portal' process='login' %}';
-      PortalSwitch.init({ portalOrigin: anonPortalOrigin, loginUrl: anonLoginUrl });
-      {# Anonymous-mode widget: no currentUser, so the badge shows "Not signed  #}
-      {# in" and offers the switch list + sign-in + back-to-portal (leave /     #}
-      {# log-out entries and the session guard are suppressed). The plain       #}
-      {# switch.js button above stays as the minimal-integration reference.     #}
-      PortalSwitchWidget.init({ portalOrigin: anonPortalOrigin, loginUrl: anonLoginUrl, defaultLang: 'zh-hant' });
-    </script>
   {% endif %}
 {% endblock %}
