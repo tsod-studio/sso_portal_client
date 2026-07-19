@@ -96,6 +96,11 @@ AUTHENTICATION_BACKENDS = [
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
+# Stable, collision-free RP-local usernames (USERNAME_STRATEGY, default
+# 'sub_at_issuer' below): new signups get `{sub}@{issuer-host}` instead of a
+# mutable, dedupe-prone `preferred_username` snapshot. See adapters.py.
+SOCIALACCOUNT_ADAPTER = 'sso_portal_client.adapters.SocialAccountAdapter'
+
 # --- allauth: portal is the ONLY login path ---------------------------------
 # SOCIALACCOUNT_ONLY disables local (username/password) login and signup UI
 # entirely — the sole way in is the SSO portal. It also flips email

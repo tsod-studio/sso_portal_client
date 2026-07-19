@@ -12,6 +12,7 @@ An RP configures the whole package through a single settings dict::
         'POST_LOGOUT_REDIRECT_URL': None,  # absolute URL for RP-initiated logout
         'STATIC_ORIGIN': None,   # origin serving the portal's /static/js/*; None => SERVER_URL's origin
         'SESSION_CUTOFF_TIME': '00:00',  # local time-of-day sessions die at; None disables
+        'USERNAME_STRATEGY': 'sub_at_issuer',  # or 'preferred_username'; see adapters.py
     }
 """
 
@@ -39,6 +40,9 @@ PROVIDER_ID = 'sso_portal'
 # section for the degraded-but-functional no-hint UX.
 SESSION_ID_TOKEN_KEY = '_sso_portal_client_id_token'  # noqa: S105 # nosec B105  # session key name, not a secret
 
+# Valid values for USERNAME_STRATEGY. See adapters.SocialAccountAdapter.
+_USERNAME_STRATEGIES = ('sub_at_issuer', 'preferred_username')
+
 _DEFAULTS: dict[str, Any] = {
     'SERVER_URL': None,
     'CLIENT_ID': None,
@@ -49,6 +53,7 @@ _DEFAULTS: dict[str, Any] = {
     'POST_LOGOUT_REDIRECT_URL': None,
     'STATIC_ORIGIN': None,
     'SESSION_CUTOFF_TIME': '00:00',
+    'USERNAME_STRATEGY': 'sub_at_issuer',
 }
 
 _REQUIRED = ('SERVER_URL', 'CLIENT_ID')
@@ -94,6 +99,24 @@ def session_cutoff_time() -> 'datetime.time | None':
     except (TypeError, ValueError) as exc:
         msg = f"SSO_PORTAL_CLIENT['SESSION_CUTOFF_TIME'] must be 'HH:MM' or None, got {raw!r}."
         raise ImproperlyConfigured(msg) from exc
+
+
+def username_strategy() -> str:
+    """The validated ``USERNAME_STRATEGY`` value.
+
+    ``'sub_at_issuer'`` (default): ``adapters.SocialAccountAdapter`` sets the
+    RP-local username to ``f'{sub}@{issuer_host}'`` on every new portal
+    signup — stable and collision-free because ``sub`` is immutable and
+    globally unique per portal user. ``'preferred_username'``: keeps
+    allauth's stock behavior (username seeded from the mutable
+    ``preferred_username`` claim, deduped with a numeric suffix on
+    collision). See the README "Stable usernames" section.
+    """
+    raw: str = get_settings()['USERNAME_STRATEGY']
+    if raw not in _USERNAME_STRATEGIES:
+        msg = f"SSO_PORTAL_CLIENT['USERNAME_STRATEGY'] must be one of {_USERNAME_STRATEGIES!r}, got {raw!r}."
+        raise ImproperlyConfigured(msg)
+    return raw
 
 
 def discovery_url() -> str:
