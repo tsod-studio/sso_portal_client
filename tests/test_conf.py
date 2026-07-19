@@ -1,8 +1,16 @@
+import datetime
+
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
-from sso_portal_client.conf import PROVIDER_ID, discovery_url, get_settings, provider_config
+from sso_portal_client.conf import (
+    PROVIDER_ID,
+    discovery_url,
+    get_settings,
+    provider_config,
+    session_cutoff_time,
+)
 
 
 def test_defaults_merged():
@@ -72,3 +80,27 @@ def test_provider_config_shape():
     assert app['settings']['server_url'] == 'http://127.0.0.1:8000/o'
     # Per-app PKCE switch (allauth oauth2 provider get_pkce_params).
     assert app['settings']['oauth_pkce_enabled'] is True
+
+
+class TestSessionCutoffTime:
+    def test_default_is_midnight(self):
+        assert session_cutoff_time() == datetime.time(0, 0)
+
+    @override_settings(
+        SSO_PORTAL_CLIENT={'SERVER_URL': 'http://portal.test/o', 'CLIENT_ID': 'x', 'SESSION_CUTOFF_TIME': '04:30'}
+    )
+    def test_custom_time_parsed(self):
+        assert session_cutoff_time() == datetime.time(4, 30)
+
+    @override_settings(
+        SSO_PORTAL_CLIENT={'SERVER_URL': 'http://portal.test/o', 'CLIENT_ID': 'x', 'SESSION_CUTOFF_TIME': None}
+    )
+    def test_none_disables(self):
+        assert session_cutoff_time() is None
+
+    @override_settings(
+        SSO_PORTAL_CLIENT={'SERVER_URL': 'http://portal.test/o', 'CLIENT_ID': 'x', 'SESSION_CUTOFF_TIME': 'tomorrow'}
+    )
+    def test_invalid_value_raises(self):
+        with pytest.raises(ImproperlyConfigured, match='SESSION_CUTOFF_TIME'):
+            session_cutoff_time()

@@ -11,9 +11,11 @@ An RP configures the whole package through a single settings dict::
         'SUPERUSER_GROUPS': [],  # same for is_superuser (empty = never touch)
         'POST_LOGOUT_REDIRECT_URL': None,  # absolute URL for RP-initiated logout
         'STATIC_ORIGIN': None,   # origin serving the portal's /static/js/*; None => SERVER_URL's origin
+        'SESSION_CUTOFF_TIME': '00:00',  # local time-of-day sessions die at; None disables
     }
 """
 
+import datetime
 from typing import Any
 
 from django.conf import settings as django_settings
@@ -46,6 +48,7 @@ _DEFAULTS: dict[str, Any] = {
     'SUPERUSER_GROUPS': [],
     'POST_LOGOUT_REDIRECT_URL': None,
     'STATIC_ORIGIN': None,
+    'SESSION_CUTOFF_TIME': '00:00',
 }
 
 _REQUIRED = ('SERVER_URL', 'CLIENT_ID')
@@ -70,6 +73,27 @@ def get_settings() -> dict[str, Any]:
             msg = f'SSO_PORTAL_CLIENT[{key!r}] is required.'
             raise ImproperlyConfigured(msg)
     return merged
+
+
+def session_cutoff_time() -> 'datetime.time | None':
+    """The local time-of-day at which portal-established RP sessions expire.
+
+    Parsed from ``SESSION_CUTOFF_TIME`` ('HH:MM', local time per Django's
+    ``TIME_ZONE``). The default '00:00' scopes every session to the calendar
+    day it was created on — matching the portal's day-scoped store model
+    (per-day enrollment, "today's" quick-switch lists), so a station never
+    greets the morning shift with yesterday's login. ``None`` disables the
+    cutoff and leaves Django's ``SESSION_COOKIE_AGE`` in charge.
+    """
+    raw = get_settings()['SESSION_CUTOFF_TIME']
+    if raw is None:
+        return None
+    try:
+        hour, minute = str(raw).split(':')
+        return datetime.time(int(hour), int(minute))
+    except (TypeError, ValueError) as exc:
+        msg = f"SSO_PORTAL_CLIENT['SESSION_CUTOFF_TIME'] must be 'HH:MM' or None, got {raw!r}."
+        raise ImproperlyConfigured(msg) from exc
 
 
 def discovery_url() -> str:

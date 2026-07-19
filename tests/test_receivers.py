@@ -6,12 +6,15 @@ openid_connect adapter persists it: ``{'userinfo': {...}, 'id_token': {...}}``
 ``groups`` claim present in both and ``sid`` only in the id_token.
 """
 
+from datetime import timedelta
+
 import pytest
 from allauth.account.signals import user_logged_in
 from allauth.socialaccount.models import SocialAccount, SocialLogin
 from allauth.socialaccount.signals import social_account_added
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import RequestFactory, override_settings
+from django.utils import timezone
 
 from sso_portal_client.models import PortalSession
 from sso_portal_client.signals import claims_synced
@@ -147,3 +150,65 @@ def test_login_signal_applies_staff_mapping(user):
     send_login(user, make_sociallogin(user))
     user.refresh_from_db()
     assert user.is_staff is True
+
+
+class TestSessionCutoff:
+    """Portal logins bind the RP session's expiry to the next local
+    SESSION_CUTOFF_TIME (default midnight), so a station never crosses into
+    the next business day still signed in as yesterday's user.
+    """
+
+    def _expected_next_cutoff(self, cutoff_hour=0, cutoff_minute=0):
+        now = timezone.localtime()
+        expected = now.replace(hour=cutoff_hour, minute=cutoff_minute, second=0, microsecond=0)
+        if expected <= now:
+            expected += timedelta(days=1)
+        return expected
+
+    def test_portal_login_expires_at_next_midnight(self, django_user_model):
+        user = django_user_model.objects.create_user('alice')
+        request = make_request()
+        send_login(user, make_sociallogin(user), request=request)
+
+        expiry = timezone.localtime(request.session.get_expiry_date())
+        expected = self._expected_next_cutoff()
+        # Second-level tolerance: get_expiry_date round-trips through the
+        # session store, which may truncate microseconds.
+        assert abs((expiry - expected).total_seconds()) < 2
+
+    @override_settings(
+        SSO_PORTAL_CLIENT={
+            'SERVER_URL': 'http://127.0.0.1:8000/o',
+            'CLIENT_ID': 'test-client-id',
+            'SESSION_CUTOFF_TIME': '04:30',
+        }
+    )
+    def test_custom_cutoff_time_is_honored(self, django_user_model):
+        user = django_user_model.objects.create_user('alice')
+        request = make_request()
+        send_login(user, make_sociallogin(user), request=request)
+
+        expiry = timezone.localtime(request.session.get_expiry_date())
+        expected = self._expected_next_cutoff(4, 30)
+        assert abs((expiry - expected).total_seconds()) < 2
+
+    @override_settings(
+        SSO_PORTAL_CLIENT={
+            'SERVER_URL': 'http://127.0.0.1:8000/o',
+            'CLIENT_ID': 'test-client-id',
+            'SESSION_CUTOFF_TIME': None,
+        }
+    )
+    def test_none_leaves_default_session_age(self, django_user_model, settings):
+        user = django_user_model.objects.create_user('alice')
+        request = make_request()
+        send_login(user, make_sociallogin(user), request=request)
+
+        assert request.session.get_expiry_age() == settings.SESSION_COOKIE_AGE
+
+    def test_non_portal_login_untouched(self, django_user_model, settings):
+        user = django_user_model.objects.create_user('bob')
+        request = make_request()
+        send_login(user, make_sociallogin(user, provider='github'), request=request)
+
+        assert request.session.get_expiry_age() == settings.SESSION_COOKIE_AGE
