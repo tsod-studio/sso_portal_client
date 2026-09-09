@@ -28,7 +28,7 @@ uv add git+https://github.com/<you>/sso_portal_client
 ```python
 INSTALLED_APPS = [
     # ...
-    'django.contrib.sessions',          # DB sessions required for back-channel logout
+    'django.contrib.sessions',  # DB sessions required for back-channel logout
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
@@ -50,7 +50,7 @@ AUTHENTICATION_BACKENDS = [
 from sso_portal_client import provider_config
 
 SSO_PORTAL_CLIENT = {
-    'SERVER_URL': 'http://127.0.0.1:8000/o',       # portal issuer; discovery derived
+    'SERVER_URL': 'http://127.0.0.1:8000/o',  # portal issuer; discovery derived
     'CLIENT_ID': env('SSO_CLIENT_ID'),
     'CLIENT_SECRET': env('SSO_CLIENT_SECRET'),
 }
@@ -72,7 +72,7 @@ URLs:
 ```python
 urlpatterns = [
     path('accounts/', include('allauth.urls')),
-    path('sso/', include('sso_portal_client.urls')),   # backchannel-logout + session-ping + logout
+    path('sso/', include('sso_portal_client.urls')),  # backchannel-logout + session-ping + logout
 ]
 ```
 
@@ -188,9 +188,9 @@ which the login sync materializes). Read everything else on demand:
 ```python
 from sso_portal_client.claims import get_claim, get_claims
 
-get_claim(request.user, 'picture')   # LINE avatar URL, or None
-get_claim(request.user, 'locale')    # saved portal UI language, or None
-get_claims(request.user)             # the merged claim dict
+get_claim(request.user, 'picture')  # LINE avatar URL, or None
+get_claim(request.user, 'locale')  # saved portal UI language, or None
+get_claims(request.user)  # the merged claim dict
 ```
 
 New portal claims become readable with zero RP migrations.
@@ -275,7 +275,7 @@ MIDDLEWARE = [
     # ...
     'django.middleware.security.SecurityMiddleware',
     # ...
-    'sso_portal_client.middleware.PortalSwitchMiddleware',   # AFTER SecurityMiddleware
+    'sso_portal_client.middleware.PortalSwitchMiddleware',  # AFTER SecurityMiddleware
 ]
 
 TEMPLATES = [
@@ -442,6 +442,7 @@ which this package intentionally does not map to any model:
 ```python
 from django.dispatch import receiver
 from sso_portal_client.signals import claims_synced
+
 
 @receiver(claims_synced)
 def map_role(sender, user, claims, **kwargs):
