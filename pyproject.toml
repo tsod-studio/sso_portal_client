@@ -8,7 +8,9 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "django>=6.0",
+    # 6.0.8 is the first release without PYSEC-2026-3717; a patch-level floor
+    # inside the 6.0 series, so it costs installers nothing but the advisory.
+    "django>=6.0.8",
     "django-allauth[socialaccount]>=65.15.0",
     # Back-channel logout: verify logout_token signatures against the portal's
     # jwks (pyjwt) and fetch the OIDC discovery document (requests). Both are
