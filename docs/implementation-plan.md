@@ -54,12 +54,13 @@ maintained library — the portal enforces PKCE). The package ships:
 
   ```python
   SSO_PORTAL_CLIENT = {
-      'SERVER_URL': 'http://127.0.0.1:8000/o',   # issuer; discovery derived
-      'CLIENT_ID': ..., 'CLIENT_SECRET': ...,     # from env in real RPs
-      'GROUP_PREFIX': None,   # None => manage ALL group memberships;
-                              # 'samplestore-' => manage only that namespace
-      'STAFF_GROUPS': [],     # claim groups granting is_staff (empty = never touch)
-      'SUPERUSER_GROUPS': [], # same for is_superuser (empty = never touch)
+      'SERVER_URL': 'http://127.0.0.1:8000/o',  # issuer; discovery derived
+      'CLIENT_ID': ...,
+      'CLIENT_SECRET': ...,  # from env in real RPs
+      'GROUP_PREFIX': None,  # None => manage ALL group memberships;
+      # 'samplestore-' => manage only that namespace
+      'STAFF_GROUPS': [],  # claim groups granting is_staff (empty = never touch)
+      'SUPERUSER_GROUPS': [],  # same for is_superuser (empty = never touch)
   }
   ```
 
