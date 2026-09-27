@@ -20,7 +20,7 @@ locally. This package implements the RP half once, properly:
   every login, overwrite-not-append so removals propagate)
 - **permissions**: none invented — RPs attach standard Django permissions to
   the synced Groups; membership sync then grants/revokes them automatically.
-  This is the "自動給予群組對應的權限" story, using nothing but Django's own
+  This is the "group permissions are granted automatically" story, using nothing but Django's own
   permission machinery.
 
 ## Repo layout
@@ -125,7 +125,7 @@ backchannel-logout / session-ping lands per the above.
 
 ## example_project/ — SampleStore (Django)
 
-Minimal but real Django project proving "RP 只要引入就自動有":
+Minimal but real Django project proving "an RP gets it all just by installing the package":
 
 - `config/` settings: SQLite, `SSO_PORTAL_CLIENT` from env with dev
   defaults (`SERVER_URL=http://127.0.0.1:8000/o`, client id
