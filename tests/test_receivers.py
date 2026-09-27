@@ -6,7 +6,8 @@ openid_connect adapter persists it: ``{'userinfo': {...}, 'id_token': {...}}``
 ``groups`` claim present in both and ``sid`` only in the id_token.
 """
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from allauth.account.signals import user_logged_in
@@ -16,6 +17,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import RequestFactory, override_settings
 from django.utils import timezone
 
+from sso_portal_client import receivers
 from sso_portal_client.models import PortalSession
 from sso_portal_client.signals import claims_synced
 
@@ -103,6 +105,14 @@ def test_legacy_flat_extra_data_supported(user):
     send_login(user, make_sociallogin(user, extra_data={'sub': '42', 'groups': ['staff'], 'sid': 'legacy-sid'}))
     assert group_names(user) == {'staff'}
     assert PortalSession.objects.get().sid == 'legacy-sid'
+
+
+def test_id_token_only_extra_data_supported(user):
+    # A login whose extra_data carries an id_token but no userinfo response
+    # must still be read from the id_token, not as the legacy flat layout.
+    send_login(user, make_sociallogin(user, extra_data={'id_token': ID_TOKEN}))
+    assert group_names(user) == {'staff', 'samplestore-admin'}
+    assert PortalSession.objects.get().sid == 'portal-sid-1'
 
 
 def test_other_provider_ignored(user):
@@ -212,3 +222,21 @@ class TestSessionCutoff:
         send_login(user, make_sociallogin(user, provider='github'), request=request)
 
         assert request.session.get_expiry_age() == settings.SESSION_COOKIE_AGE
+
+    @override_settings(
+        SSO_PORTAL_CLIENT={
+            'SERVER_URL': 'http://127.0.0.1:8000/o',
+            'CLIENT_ID': 'test-client-id',
+            'SESSION_CUTOFF_TIME': '18:00',
+        }
+    )
+    def test_cutoff_later_today_expires_the_same_day(self, django_user_model, monkeypatch):
+        # Pin the clock to mid-morning so the 18:00 cutoff is still ahead:
+        # the session must expire this evening, not tomorrow evening.
+        now = datetime(2026, 3, 10, 9, 15, 30, tzinfo=UTC)
+        monkeypatch.setattr(receivers, 'timezone', SimpleNamespace(localtime=lambda: now))
+        user = django_user_model.objects.create_user('alice')
+        request = make_request()
+        send_login(user, make_sociallogin(user), request=request)
+
+        assert request.session.get_expiry_date() == datetime(2026, 3, 10, 18, 0, tzinfo=UTC)
