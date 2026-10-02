@@ -11,7 +11,7 @@ code.
 Built on django-allauth's `openid_connect` provider (discovery, PKCE S256,
 state/nonce handled by allauth — the portal requires PKCE).
 
-- Python >= 3.12, Django >= 6.0, django-allauth >= 65.15
+- Python >= 3.12, Django >= 6.0, django-allauth >= 65.19.6
 
 ## Install
 
