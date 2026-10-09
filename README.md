@@ -116,6 +116,7 @@ login revokes it. No role models, no claim parsing, no custom decorators.
 | `STATIC_ORIGIN` | `None` | Origin serving the portal's `/static/js/switch*.js` (see "Embedding the store-switch widget"); `None` reuses `SERVER_URL`'s origin |
 | `SESSION_CUTOFF_TIME` | `'00:00'` | Local time-of-day (`'HH:MM'`, per `TIME_ZONE`) at which portal-established sessions expire — see "Day-scoped sessions"; `None` disables the cutoff |
 | `USERNAME_STRATEGY` | `'sub_at_issuer'` | New-signup username scheme, see "Stable usernames" below; requires `SOCIALACCOUNT_ADAPTER = 'sso_portal_client.adapters.SocialAccountAdapter'` to take effect. `'preferred_username'` keeps allauth's stock (mutable, dedupe-prone) behavior |
+| `DISCOVERY_CACHE_SECONDS` | `300` | Process-local discovery cache TTL in seconds, per discovery URL; a non-negative integer, with `0` disabling discovery caching |
 | `SET_COOP_HEADER` | `True` | Whether `PortalSwitchMiddleware` sets the popup-friendly `Cross-Origin-Opener-Policy: same-origin-allow-popups` header — see "Two-line widget integration"; `False` opts out entirely (e.g. an RP managing COOP itself) |
 
 ### `GROUP_PREFIX` semantics
@@ -170,9 +171,19 @@ The package records the id_token's `sid` claim per login (model
 `PortalSession`, populated by the login receiver), and on a valid
 `logout_token` (RS256 signature against the portal's jwks, `iss`, `aud`,
 backchannel-logout `events` entry, `nonce` absent, `sid` present — any
-failure is a 400) deletes the matching `django_session` rows. This is what
+token validation failure is a 400) deletes the matching `django_session` rows. This is what
 lets the portal's store-switch flow kill your app's session the moment the
 user switches away.
+
+Discovery and JWKS fetch failures (including timeouts and malformed JSON)
+return `503`, so the portal can distinguish upstream outages from invalid
+tokens (`400`). Discovery is cached per URL for `DISCOVERY_CACHE_SECONDS`
+(default `300`). Each process reuses a JWK client per `jwks_uri`, retaining
+PyJWT's default 300-second JWK-set cache without a per-key LRU cache. An
+unknown `kid` triggers an immediate JWKS refresh, and an expired JWK set
+is fetched again so removed keys stop being accepted. Each handled POST
+logs one INFO line with status, duration in milliseconds, and the number
+of Django sessions deleted; tokens and session IDs are never logged.
 
 Requires the **database session backend** (Django's default) — a
 signed-cookie session cannot be revoked server-side.
@@ -251,6 +262,29 @@ session under `sso_portal_client.conf.SESSION_ID_TOKEN_KEY`, `global_logout`
 picks it up automatically and sends both `id_token_hint` and (when
 `POST_LOGOUT_REDIRECT_URL` is set) `post_logout_redirect_uri` for a prompt-free
 logout — no code change needed here.
+
+## Local logout (switch widget)
+
+`POST /sso/local-logout/` (URL name `sso_portal_client:local_logout`) calls
+Django's `logout(request)` and deletes the `PortalSession` rows for that
+RP session key. It returns `204 No Content`, including for anonymous
+callers, and never redirects to the portal. Other RP sessions are unaffected.
+GET returns `405`; POST requires normal Django CSRF protection (a valid
+CSRF cookie and the `X-CSRFToken` header are accepted), otherwise `403`.
+
+The switch widget accepts two optional init options: `localLogoutUrl`
+(the endpoint above) and `csrfToken` (the request's CSRF token, obtained
+with `django.middleware.csrf.get_token(request)` or `{{ csrf_token }}`).
+Both must be set to enable RP-local logout. `{% portal_switch_widget %}`
+supplies both automatically, JSON-encoded with the other options.
+
+When a portal logout completion message includes `loggedOut: true`, a
+compatible widget POSTs to `localLogoutUrl` with `credentials: 'same-origin'`
+and `X-CSRFToken: csrfToken`, then continues to `loginUrl` whether the POST
+succeeds or fails. In redirect mode, selecting a logout entry POSTs locally
+before navigating to the portal. A plain user switch is unchanged. Without
+both options, the widget keeps its existing behavior. This allows local
+logout to complete even if the portal's back-channel delivery fails.
 
 ## Session ping
 
@@ -346,7 +380,8 @@ below), `loginUrl` (allauth's provider login URL, `process=login` plus
 `next=<current path>` so a switch or sign-in lands the browser back where it
 started), `currentUser` (from `request.portal_user` — `null` on an
 anonymous *or* non-portal-backed page, mounting the widget in anonymous
-mode), and `sessionPingUrl` (reversed from this package's own endpoint).
+mode), `sessionPingUrl` and `localLogoutUrl` (reversed from this package's
+own endpoints), and `csrfToken` (generated for the request).
 
 **Migrating from a hand-rolled `PortalSwitchWidget.init()` call**: delete the
 per-view COOP header assignment, the `json_script`'d `portal_origin`/
@@ -364,6 +399,13 @@ already reads the correct `preferred_username` claim for you. See
 `config/settings.py`) for the before/after in a real app.
 
 ### Custom integrations (bypassing the tag)
+
+Integrators who hand-initialize `PortalSwitchWidget.init({...})` must pass
+both `localLogoutUrl` and `csrfToken` to enable RP-local logout. Reverse
+`sso_portal_client:local_logout` for the URL and obtain the token with
+`django.middleware.csrf.get_token(request)` (or `{{ csrf_token }}`), then
+encode both with `json_script` before reading them into the init options,
+as the bundled widget template does. Keep Django's CSRF middleware enabled.
 
 The portal's switch widget ships as a plain `<script src>` tag
 (`switch-widget.js`) plus a `PortalSwitchWidget.init({...})` call — see that

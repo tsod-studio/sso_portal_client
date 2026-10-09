@@ -152,3 +152,22 @@ class TestUsernameStrategy:
     def test_unknown_value_raises(self):
         with pytest.raises(ImproperlyConfigured, match='USERNAME_STRATEGY'):
             username_strategy()
+
+
+def test_discovery_cache_default() -> None:
+    assert get_settings()['DISCOVERY_CACHE_SECONDS'] == 300
+
+
+@pytest.mark.parametrize('value', [-1, True, 1.5, '300', None])
+def test_discovery_cache_rejects_invalid_ttl(value: object) -> None:
+    with (
+        override_settings(
+            SSO_PORTAL_CLIENT={
+                'SERVER_URL': 'https://portal.test/o',
+                'CLIENT_ID': 'x',
+                'DISCOVERY_CACHE_SECONDS': value,
+            }
+        ),
+        pytest.raises(ImproperlyConfigured, match='must be a non-negative integer'),
+    ):
+        get_settings()

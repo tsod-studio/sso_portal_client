@@ -13,6 +13,7 @@ An RP configures the whole package through a single settings dict::
         'STATIC_ORIGIN': None,   # origin serving the portal's /static/js/*; None => SERVER_URL's origin
         'SESSION_CUTOFF_TIME': '00:00',  # local time-of-day sessions die at; None disables
         'USERNAME_STRATEGY': 'sub_at_issuer',  # or 'preferred_username'; see adapters.py
+        'DISCOVERY_CACHE_SECONDS': 300,  # process-local discovery TTL; 0 disables caching
         'SET_COOP_HEADER': True,  # PortalSwitchMiddleware sets the popup-friendly COOP header
     }
 """
@@ -56,6 +57,7 @@ _DEFAULTS: dict[str, Any] = {
     'STATIC_ORIGIN': None,
     'SESSION_CUTOFF_TIME': '00:00',
     'USERNAME_STRATEGY': 'sub_at_issuer',
+    'DISCOVERY_CACHE_SECONDS': 300,
     'SET_COOP_HEADER': True,
 }
 
@@ -80,6 +82,10 @@ def get_settings() -> dict[str, Any]:
         if not merged[key]:
             msg = f'SSO_PORTAL_CLIENT[{key!r}] is required.'
             raise ImproperlyConfigured(msg)
+    ttl = merged['DISCOVERY_CACHE_SECONDS']
+    if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl < 0:
+        msg = "SSO_PORTAL_CLIENT['DISCOVERY_CACHE_SECONDS'] must be a non-negative integer."
+        raise ImproperlyConfigured(msg)
     return merged
 
 

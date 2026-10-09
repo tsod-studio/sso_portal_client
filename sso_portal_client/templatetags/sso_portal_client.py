@@ -9,7 +9,8 @@ src>`` tags and its ``PortalSwitchWidget.init({...})`` call, with
 server-side (allauth's provider login URL + ``next=<current path>``,
 so a switch/sign-in lands the browser back where it started), ``currentUser``
 from ``request.portal_user`` (``None`` -> anonymous-mode widget), and
-``sessionPingUrl`` reversed from this package's own ``session_ping`` view.
+``sessionPingUrl`` / ``localLogoutUrl`` reversed from this package's own
+views, with ``csrfToken`` generated for the request's local logout POST.
 
 Deliberately narrow surface: only ``require_session`` and ``strategy`` are
 exposed as tag kwargs — the two options most RPs actually need to flip.
@@ -29,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 from allauth.socialaccount.adapter import get_adapter
 from django import template
 from django.contrib.auth import REDIRECT_FIELD_NAME
+from django.middleware.csrf import get_token
 from django.urls import reverse
 
 from sso_portal_client.conf import PROVIDER_ID, portal_origin, static_origin
@@ -88,6 +90,8 @@ def portal_switch_widget(
         'login_url': _login_url(request),
         'current_user': current_user,
         'session_ping_url': reverse('sso_portal_client:session_ping'),
+        'local_logout_url': reverse('sso_portal_client:local_logout'),
+        'widget_csrf_token': get_token(request),
         'require_session': require_session,
         'strategy': strategy,
     }
