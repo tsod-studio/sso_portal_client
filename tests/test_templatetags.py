@@ -6,8 +6,12 @@ request.portal_user and the real MIDDLEWARE/TEMPLATES wiring are exercised
 end to end, not mocked.
 """
 
+import json
+import re
+
 import pytest
 from allauth.socialaccount.models import SocialAccount
+from django.test import Client
 
 pytestmark = pytest.mark.django_db
 
@@ -105,3 +109,24 @@ def test_static_origin_override_moves_only_the_script_src(client, settings):
     # portalOrigin (what the widget talks to at runtime) must stay the app
     # origin — only the <script src> moves to the static/CDN origin.
     assert '>"http://127.0.0.1:8000"</script>' in content
+
+
+def test_local_logout_options_are_json_encoded_and_csrf_usable() -> None:
+    browser = Client(enforce_csrf_checks=True)
+    response = browser.get(WIDGET_URL)
+    content = response.content.decode()
+    url_match = re.search(
+        r'<script id="sso-portal-client-local-logout-url" type="application/json">(.*?)</script>', content
+    )
+    token_match = re.search(
+        r'<script id="sso-portal-client-csrf-token" type="application/json">(.*?)</script>', content
+    )
+    assert url_match is not None
+    assert token_match is not None
+    local_logout_url = json.loads(url_match[1])
+    csrf_token = json.loads(token_match[1])
+    assert local_logout_url == '/sso/local-logout/'
+    assert len(csrf_token) == 64
+    assert 'localLogoutUrl: localLogoutUrl' in content
+    assert 'csrfToken: csrfToken' in content
+    assert browser.post(local_logout_url, HTTP_X_CSRFTOKEN=csrf_token).status_code == 204

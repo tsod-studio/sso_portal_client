@@ -263,6 +263,29 @@ picks it up automatically and sends both `id_token_hint` and (when
 `POST_LOGOUT_REDIRECT_URL` is set) `post_logout_redirect_uri` for a prompt-free
 logout — no code change needed here.
 
+## Local logout (switch widget)
+
+`POST /sso/local-logout/` (URL name `sso_portal_client:local_logout`) calls
+Django's `logout(request)` and deletes the `PortalSession` rows for that
+RP session key. It returns `204 No Content`, including for anonymous
+callers, and never redirects to the portal. Other RP sessions are unaffected.
+GET returns `405`; POST requires normal Django CSRF protection (a valid
+CSRF cookie and the `X-CSRFToken` header are accepted), otherwise `403`.
+
+The switch widget accepts two optional init options: `localLogoutUrl`
+(the endpoint above) and `csrfToken` (the request's CSRF token, obtained
+with `django.middleware.csrf.get_token(request)` or `{{ csrf_token }}`).
+Both must be set to enable RP-local logout. `{% portal_switch_widget %}`
+supplies both automatically, JSON-encoded with the other options.
+
+When a portal logout completion message includes `loggedOut: true`, a
+compatible widget POSTs to `localLogoutUrl` with `credentials: 'same-origin'`
+and `X-CSRFToken: csrfToken`, then continues to `loginUrl` whether the POST
+succeeds or fails. In redirect mode, selecting a logout entry POSTs locally
+before navigating to the portal. A plain user switch is unchanged. Without
+both options, the widget keeps its existing behavior. This allows local
+logout to complete even if the portal's back-channel delivery fails.
+
 ## Session ping
 
 `GET /sso/session-ping/` returns `200 {"sub": ..., "sid": ...}` for a live
@@ -357,7 +380,8 @@ below), `loginUrl` (allauth's provider login URL, `process=login` plus
 `next=<current path>` so a switch or sign-in lands the browser back where it
 started), `currentUser` (from `request.portal_user` — `null` on an
 anonymous *or* non-portal-backed page, mounting the widget in anonymous
-mode), and `sessionPingUrl` (reversed from this package's own endpoint).
+mode), `sessionPingUrl` and `localLogoutUrl` (reversed from this package's
+own endpoints), and `csrfToken` (generated for the request).
 
 **Migrating from a hand-rolled `PortalSwitchWidget.init()` call**: delete the
 per-view COOP header assignment, the `json_script`'d `portal_origin`/
@@ -375,6 +399,13 @@ already reads the correct `preferred_username` claim for you. See
 `config/settings.py`) for the before/after in a real app.
 
 ### Custom integrations (bypassing the tag)
+
+Integrators who hand-initialize `PortalSwitchWidget.init({...})` must pass
+both `localLogoutUrl` and `csrfToken` to enable RP-local logout. Reverse
+`sso_portal_client:local_logout` for the URL and obtain the token with
+`django.middleware.csrf.get_token(request)` (or `{{ csrf_token }}`), then
+encode both with `json_script` before reading them into the init options,
+as the bundled widget template does. Keep Django's CSRF middleware enabled.
 
 The portal's switch widget ships as a plain `<script src>` tag
 (`switch-widget.js`) plus a `PortalSwitchWidget.init({...})` call — see that

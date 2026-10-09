@@ -24,7 +24,7 @@ from django.conf import settings as django_settings
 from django.contrib.auth import logout as auth_logout
 from django.contrib.sessions.models import Session
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from django.views.decorators.http import require_GET, require_POST
 from jwt import PyJWKClient
 
@@ -215,6 +215,17 @@ def session_ping(request: HttpRequest) -> JsonResponse:
             'sid': portal_session.sid if portal_session else None,
         }
     )
+
+
+@require_POST
+@csrf_protect
+def local_logout(request: HttpRequest) -> HttpResponse:
+    """End only this RP session after a widget logout, without a redirect."""
+    session_key = request.session.session_key
+    auth_logout(request)
+    if session_key:
+        PortalSession.objects.filter(session_key=session_key).delete()
+    return HttpResponse(status=204)
 
 
 def _local_fallback_url() -> str:
