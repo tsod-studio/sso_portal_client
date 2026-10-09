@@ -116,6 +116,7 @@ login revokes it. No role models, no claim parsing, no custom decorators.
 | `STATIC_ORIGIN` | `None` | Origin serving the portal's `/static/js/switch*.js` (see "Embedding the store-switch widget"); `None` reuses `SERVER_URL`'s origin |
 | `SESSION_CUTOFF_TIME` | `'00:00'` | Local time-of-day (`'HH:MM'`, per `TIME_ZONE`) at which portal-established sessions expire — see "Day-scoped sessions"; `None` disables the cutoff |
 | `USERNAME_STRATEGY` | `'sub_at_issuer'` | New-signup username scheme, see "Stable usernames" below; requires `SOCIALACCOUNT_ADAPTER = 'sso_portal_client.adapters.SocialAccountAdapter'` to take effect. `'preferred_username'` keeps allauth's stock (mutable, dedupe-prone) behavior |
+| `DISCOVERY_CACHE_SECONDS` | `300` | Process-local discovery cache TTL in seconds, per discovery URL; a non-negative integer, with `0` disabling discovery caching |
 | `SET_COOP_HEADER` | `True` | Whether `PortalSwitchMiddleware` sets the popup-friendly `Cross-Origin-Opener-Policy: same-origin-allow-popups` header — see "Two-line widget integration"; `False` opts out entirely (e.g. an RP managing COOP itself) |
 
 ### `GROUP_PREFIX` semantics
@@ -170,9 +171,19 @@ The package records the id_token's `sid` claim per login (model
 `PortalSession`, populated by the login receiver), and on a valid
 `logout_token` (RS256 signature against the portal's jwks, `iss`, `aud`,
 backchannel-logout `events` entry, `nonce` absent, `sid` present — any
-failure is a 400) deletes the matching `django_session` rows. This is what
+token validation failure is a 400) deletes the matching `django_session` rows. This is what
 lets the portal's store-switch flow kill your app's session the moment the
 user switches away.
+
+Discovery and JWKS fetch failures (including timeouts and malformed JSON)
+return `503`, so the portal can distinguish upstream outages from invalid
+tokens (`400`). Discovery is cached per URL for `DISCOVERY_CACHE_SECONDS`
+(default `300`). Each process reuses a JWK client per `jwks_uri`, retaining
+PyJWT's default 300-second JWK-set cache without a per-key LRU cache. An
+unknown `kid` triggers an immediate JWKS refresh, and an expired JWK set
+is fetched again so removed keys stop being accepted. Each handled POST
+logs one INFO line with status, duration in milliseconds, and the number
+of Django sessions deleted; tokens and session IDs are never logged.
 
 Requires the **database session backend** (Django's default) — a
 signed-cookie session cannot be revoked server-side.

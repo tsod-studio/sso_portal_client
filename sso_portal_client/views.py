@@ -12,6 +12,8 @@ session cannot be revoked server-side.
 """
 
 import logging
+import time
+from threading import Lock
 from typing import Any
 from urllib.parse import urlencode
 
@@ -41,14 +43,73 @@ BACKCHANNEL_LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout'
 HTTP_TIMEOUT_SECONDS = 5
 
 
+class UpstreamFetchError(Exception):
+    """Discovery or JWKS could not be fetched or parsed."""
+
+
+class _LogoutJWKClient(PyJWKClient):
+    def fetch_data(self) -> Any:
+        """Keep upstream parsing errors distinct from token validation errors."""
+        try:
+            return super().fetch_data()
+        except (jwt.PyJWTError, ValueError, TypeError, KeyError) as exc:
+            msg = 'JWKS fetch failed'
+            raise UpstreamFetchError(msg) from exc
+
+
+_discovery_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_jwk_clients: dict[str, PyJWKClient] = {}
+_cache_lock = Lock()
+
+
+def _reset_logout_caches() -> None:
+    """Clear process-local discovery documents and JWK clients for tests."""
+    with _cache_lock:
+        _discovery_cache.clear()
+        _jwk_clients.clear()
+
+
 def _discovery() -> dict[str, Any]:
-    """Fetch the portal's OIDC discovery document (not cached: logout is
-    rare, and always reflecting the portal's current jwks_uri/issuer is
-    worth more than the round trip)."""
-    response = requests.get(discovery_url(), timeout=HTTP_TIMEOUT_SECONDS)
-    response.raise_for_status()
-    result: dict[str, Any] = response.json()
-    return result
+    """Fetch and cache discovery per URL for the configured TTL."""
+    url = discovery_url()
+    ttl = get_settings()['DISCOVERY_CACHE_SECONDS']
+    with _cache_lock:
+        cached = _discovery_cache.get(url)
+        if ttl and cached and time.monotonic() < cached[0]:
+            return cached[1]
+        try:
+            response = requests.get(url, timeout=HTTP_TIMEOUT_SECONDS)
+            response.raise_for_status()
+            result = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            msg = 'Discovery fetch failed'
+            raise UpstreamFetchError(msg) from exc
+        if not isinstance(result, dict) or any(
+            not isinstance(result.get(key), str) or not result[key] for key in ('issuer', 'jwks_uri')
+        ):
+            msg = 'Invalid discovery document'
+            raise UpstreamFetchError(msg)
+        _discovery_cache[url] = (time.monotonic() + ttl, result)
+        return result
+
+
+def _jwk_client(uri: str) -> PyJWKClient:
+    """Reuse the JWK-set TTL cache; never retain removed keys in a key LRU."""
+    with _cache_lock:
+        if uri not in _jwk_clients:
+            try:
+                _jwk_clients[uri] = _LogoutJWKClient(
+                    uri,
+                    timeout=HTTP_TIMEOUT_SECONDS,
+                    cache_jwk_set=True,
+                    # PyJWT's default refetch cooldown stays on: the endpoint is reachable from the
+                    # internet, and tokens with random kids must not turn into one JWKS fetch each.
+                    cache_keys=False,
+                )
+            except jwt.PyJWKClientError as exc:
+                msg = 'Invalid discovery JWKS URI'
+                raise UpstreamFetchError(msg) from exc
+        return _jwk_clients[uri]
 
 
 def _decode_logout_token(token: str, *, discovery: dict[str, Any], client_id: str) -> dict[str, Any]:
@@ -59,7 +120,7 @@ def _decode_logout_token(token: str, *, discovery: dict[str, Any], client_id: st
     backchannel-logout event, absence of a nonce claim, presence of sid
     (this RP only tracks sid, not sub-wide logout).
     """
-    signing_key = PyJWKClient(discovery['jwks_uri'], timeout=HTTP_TIMEOUT_SECONDS).get_signing_key_from_jwt(token)
+    signing_key = _jwk_client(discovery['jwks_uri']).get_signing_key_from_jwt(token)
     claims: dict[str, Any] = jwt.decode(
         token,
         signing_key.key,
@@ -89,23 +150,40 @@ def backchannel_logout(request: HttpRequest) -> HttpResponse:
     browser — there is no session cookie to ride, and the logout_token's
     signature is the authentication.
     """
-    token = request.POST.get('logout_token', '')
-    if not token:
-        return HttpResponse('missing logout_token', status=400)
-
-    client_id = get_settings()['CLIENT_ID']
+    started = time.monotonic()
+    status = 400
+    deleted = 0
     try:
-        claims = _decode_logout_token(token, discovery=_discovery(), client_id=client_id)
-    except Exception:
-        logger.warning('back-channel logout: rejected invalid logout_token')
-        return HttpResponse('invalid logout token', status=400)
+        token = request.POST.get('logout_token', '')
+        if not token:
+            return HttpResponse('missing logout_token', status=status)
 
-    sid = claims['sid']
-    portal_sessions = PortalSession.objects.filter(sid=sid)
-    session_keys = list(portal_sessions.values_list('session_key', flat=True))
-    Session.objects.filter(session_key__in=session_keys).delete()
-    portal_sessions.delete()
-    return HttpResponse(status=200)
+        client_id = get_settings()['CLIENT_ID']
+        try:
+            claims = _decode_logout_token(token, discovery=_discovery(), client_id=client_id)
+        except UpstreamFetchError:
+            status = 503
+            logger.warning('back-channel logout: upstream discovery/JWKS fetch failed')
+            return HttpResponse('logout upstream unavailable', status=status)
+        except (jwt.PyJWTError, ValueError):
+            logger.warning('back-channel logout: rejected invalid logout_token')
+            return HttpResponse('invalid logout token', status=status)
+
+        portal_sessions = PortalSession.objects.filter(sid=claims['sid'])
+        session_keys = list(portal_sessions.values_list('session_key', flat=True))
+        deleted, _ = Session.objects.filter(session_key__in=session_keys).delete()
+        portal_sessions.delete()
+        status = 200
+        return HttpResponse(status=status)
+    finally:
+        duration_ms = (time.monotonic() - started) * 1000
+        logger.info(
+            'back-channel logout: status=%s duration_ms=%.2f sessions_deleted=%s',
+            status,
+            duration_ms,
+            deleted,
+            extra={'status_code': status, 'duration_ms': duration_ms, 'sessions_deleted': deleted},
+        )
 
 
 @require_GET
