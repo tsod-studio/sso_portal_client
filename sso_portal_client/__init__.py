@@ -15,6 +15,9 @@ Public API:
   widget integration kit (COOP header, ``request.portal_user``, and the
   widget's ``<script>``/``init()`` wiring in one tag). See README "Two-line
   widget integration".
+- ``sso_portal_client.authorize_only`` — the client for the portal's
+  authorize-only endpoint: a second person's approval without signing
+  anyone in. See README "Authorize only".
 """
 
 from sso_portal_client.conf import provider_config
