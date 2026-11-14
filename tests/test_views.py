@@ -17,7 +17,7 @@ from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
 from django.test import override_settings
 
-from sso_portal_client import views
+from sso_portal_client import oidc, views
 from sso_portal_client.conf import SESSION_ID_TOKEN_KEY
 from sso_portal_client.models import PortalSession
 
@@ -43,8 +43,8 @@ def portal_endpoints(monkeypatch, rsa_key):
     jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(rsa_key.public_key()))
     jwk.update({'kid': KID, 'alg': 'RS256', 'use': 'sig'})
     monkeypatch.setattr(
-        views,
-        '_discovery',
+        oidc,
+        'discovery',
         lambda: {'issuer': ISSUER, 'jwks_uri': 'http://portal.test/o/jwks', 'end_session_endpoint': END_SESSION},
     )
     monkeypatch.setattr(jwt.PyJWKClient, 'fetch_data', lambda self: {'keys': [jwk]})
@@ -274,7 +274,7 @@ def test_global_logout_discovery_failure_logs_out_locally_and_uses_fallback(clie
     def boom():
         raise RuntimeError
 
-    monkeypatch.setattr(views, '_discovery', boom)
+    monkeypatch.setattr(oidc, 'discovery', boom)
     client.force_login(user)
 
     response = client.post(GLOBAL_LOGOUT_URL)

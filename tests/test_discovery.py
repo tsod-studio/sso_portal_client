@@ -1,6 +1,6 @@
-"""The un-mocked OIDC discovery fetch in ``sso_portal_client.views``.
+"""The un-mocked OIDC discovery fetch in ``sso_portal_client.oidc``.
 
-``tests/test_views.py`` replaces ``views._discovery`` wholesale; this module
+``tests/test_views.py`` replaces ``oidc.discovery`` wholesale; this module
 exercises the real function against a stubbed ``requests.get``.
 """
 
@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 import requests
 
-from sso_portal_client import views
+from sso_portal_client import oidc
 
 DISCOVERY = {'issuer': 'http://127.0.0.1:8000/o', 'jwks_uri': 'http://127.0.0.1:8000/o/jwks/'}
 
@@ -35,19 +35,19 @@ def test_discovery_fetches_well_known_document_with_timeout(monkeypatch: pytest.
         calls.append((url, kwargs))
         return FakeResponse(200, DISCOVERY)
 
-    monkeypatch.setattr(views.requests, 'get', fake_get)
+    monkeypatch.setattr(oidc.requests, 'get', fake_get)
 
-    assert views._discovery() == DISCOVERY
+    assert oidc.discovery() == DISCOVERY
     assert calls == [
-        ('http://127.0.0.1:8000/o/.well-known/openid-configuration', {'timeout': views.HTTP_TIMEOUT_SECONDS}),
+        ('http://127.0.0.1:8000/o/.well-known/openid-configuration', {'timeout': oidc.HTTP_TIMEOUT_SECONDS}),
     ]
 
 
 def test_discovery_raises_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(views.requests, 'get', lambda url, **kwargs: FakeResponse(503, {}))
+    monkeypatch.setattr(oidc.requests, 'get', lambda url, **kwargs: FakeResponse(503, {}))
 
-    with pytest.raises(views.UpstreamFetchError):
-        views._discovery()
+    with pytest.raises(oidc.UpstreamFetchError):
+        oidc.discovery()
 
 
 def test_discovery_cache_hit_and_expiry(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -58,14 +58,14 @@ def test_discovery_cache_hit_and_expiry(monkeypatch: pytest.MonkeyPatch) -> None
         calls.append(url)
         return FakeResponse(200, DISCOVERY)
 
-    monkeypatch.setattr(views.requests, 'get', fake_get)
+    monkeypatch.setattr(oidc.requests, 'get', fake_get)
     monkeypatch.setattr(time, 'monotonic', lambda: clock[0])
-    assert views._discovery() == DISCOVERY
+    assert oidc.discovery() == DISCOVERY
     clock[0] = 399.0
-    assert views._discovery() == DISCOVERY
+    assert oidc.discovery() == DISCOVERY
     assert len(calls) == 1
     clock[0] = 400.0
-    assert views._discovery() == DISCOVERY
+    assert oidc.discovery() == DISCOVERY
     assert len(calls) == 2
 
 
@@ -76,13 +76,13 @@ def test_discovery_cache_is_per_url(monkeypatch: pytest.MonkeyPatch, settings: A
         calls.append(url)
         return FakeResponse(200, {**DISCOVERY, 'issuer': url})
 
-    monkeypatch.setattr(views.requests, 'get', fake_get)
-    first = views._discovery()
+    monkeypatch.setattr(oidc.requests, 'get', fake_get)
+    first = oidc.discovery()
     original = settings.SSO_PORTAL_CLIENT
     settings.SSO_PORTAL_CLIENT = {**original, 'SERVER_URL': 'https://other.portal/o'}
-    assert views._discovery() != first
+    assert oidc.discovery() != first
     settings.SSO_PORTAL_CLIENT = original
-    assert views._discovery() == first
+    assert oidc.discovery() == first
     assert len(calls) == 2
 
 
@@ -96,11 +96,11 @@ def test_discovery_cache_configurable_ttl(monkeypatch: pytest.MonkeyPatch, setti
         calls.append(url)
         return FakeResponse(200, DISCOVERY)
 
-    monkeypatch.setattr(views.requests, 'get', fake_get)
+    monkeypatch.setattr(oidc.requests, 'get', fake_get)
     monkeypatch.setattr(time, 'monotonic', lambda: clock[0])
-    views._discovery()
-    views._discovery()
+    oidc.discovery()
+    oidc.discovery()
     assert len(calls) == (2 if ttl == 0 else 1)
     clock[0] += ttl
-    views._discovery()
+    oidc.discovery()
     assert len(calls) == (3 if ttl == 0 else 2)
