@@ -1,6 +1,6 @@
 import pytest
 
-from sso_portal_client import views
+from sso_portal_client import oidc
 
 
 @pytest.fixture
@@ -10,4 +10,4 @@ def user(django_user_model):
 
 @pytest.fixture(autouse=True)
 def reset_logout_caches() -> None:
-    views._reset_logout_caches()
+    oidc.reset_caches()

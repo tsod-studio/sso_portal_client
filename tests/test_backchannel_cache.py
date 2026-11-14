@@ -12,7 +12,7 @@ import requests
 from cryptography.hazmat.primitives.asymmetric import rsa
 from django.test import Client
 
-from sso_portal_client import views
+from sso_portal_client import oidc, views
 from sso_portal_client.models import PortalSession
 from tests.test_discovery import DISCOVERY, FakeResponse
 from tests.test_views import CLIENT_ID, ISSUER, KID, LOGOUT_URL, make_logout_token, make_session
@@ -34,7 +34,7 @@ def jwk(rsa_key: rsa.RSAPrivateKey) -> dict[str, Any]:
 @pytest.fixture
 def upstream(monkeypatch: pytest.MonkeyPatch, jwk: dict[str, Any]) -> list[object]:
     replies: list[object] = [json.dumps({'keys': [jwk]}).encode()]
-    monkeypatch.setattr(views.requests, 'get', lambda *args, **kwargs: FakeResponse(200, DISCOVERY))
+    monkeypatch.setattr(oidc.requests, 'get', lambda *args, **kwargs: FakeResponse(200, DISCOVERY))
 
     class Opener:
         def open(self, request: Any, *, timeout: float) -> io.BytesIO:
@@ -129,7 +129,7 @@ def test_discovery_jwks_uri_change_switches_clients(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert client.post(LOGOUT_URL, {'logout_token': make_logout_token(rsa_key)}).status_code == 200
-    monkeypatch.setattr(views, '_discovery', lambda: {**DISCOVERY, 'jwks_uri': 'https://portal.test/new-jwks'})
+    monkeypatch.setattr(oidc, 'discovery', lambda: {**DISCOVERY, 'jwks_uri': 'https://portal.test/new-jwks'})
     upstream.append(json.dumps({'keys': [jwk]}).encode())
     assert client.post(LOGOUT_URL, {'logout_token': make_logout_token(rsa_key)}).status_code == 200
     assert upstream == []
@@ -146,7 +146,7 @@ def test_discovery_failure_is_503(
     def fail(*args: Any, **kwargs: Any) -> FakeResponse:
         raise error
 
-    monkeypatch.setattr(views.requests, 'get', fail)
+    monkeypatch.setattr(oidc.requests, 'get', fail)
     assert client.post(LOGOUT_URL, {'logout_token': make_logout_token(rsa_key)}).status_code == 503
     assert 'upstream' in caplog.text
 
@@ -164,7 +164,7 @@ def test_discovery_failure_is_503(
 def test_malformed_discovery_is_503(
     client: Client, rsa_key: rsa.RSAPrivateKey, monkeypatch: pytest.MonkeyPatch, payload: Any
 ) -> None:
-    monkeypatch.setattr(views.requests, 'get', lambda *args, **kwargs: FakeResponse(200, payload))
+    monkeypatch.setattr(oidc.requests, 'get', lambda *args, **kwargs: FakeResponse(200, payload))
     assert client.post(LOGOUT_URL, {'logout_token': make_logout_token(rsa_key)}).status_code == 503
 
 
@@ -218,7 +218,7 @@ def test_invalid_discovery_jwks_uri_is_upstream_failure(
     client: Client, rsa_key: rsa.RSAPrivateKey, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        views.requests, 'get', lambda *args, **kwargs: FakeResponse(200, {**DISCOVERY, 'jwks_uri': 'invalid'})
+        oidc.requests, 'get', lambda *args, **kwargs: FakeResponse(200, {**DISCOVERY, 'jwks_uri': 'invalid'})
     )
     assert client.post(LOGOUT_URL, {'logout_token': make_logout_token(rsa_key)}).status_code == 503
 

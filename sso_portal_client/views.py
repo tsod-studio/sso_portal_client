@@ -13,12 +13,10 @@ session cannot be revoked server-side.
 
 import logging
 import time
-from threading import Lock
 from typing import Any
 from urllib.parse import urlencode
 
 import jwt
-import requests
 from allauth.socialaccount.models import SocialAccount
 from django.conf import settings as django_settings
 from django.contrib.auth import logout as auth_logout
@@ -26,12 +24,11 @@ from django.contrib.sessions.models import Session
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from django.views.decorators.http import require_GET, require_POST
-from jwt import PyJWKClient
 
+from sso_portal_client import oidc
 from sso_portal_client.conf import (
     PROVIDER_ID,
     SESSION_ID_TOKEN_KEY,
-    discovery_url,
     get_settings,
 )
 from sso_portal_client.models import PortalSession
@@ -40,76 +37,6 @@ logger = logging.getLogger(__name__)
 
 # OIDC Back-Channel Logout 1.0 §2.4's event claim key.
 BACKCHANNEL_LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout'
-HTTP_TIMEOUT_SECONDS = 5
-
-
-class UpstreamFetchError(Exception):
-    """Discovery or JWKS could not be fetched or parsed."""
-
-
-class _LogoutJWKClient(PyJWKClient):
-    def fetch_data(self) -> Any:
-        """Keep upstream parsing errors distinct from token validation errors."""
-        try:
-            return super().fetch_data()
-        except (jwt.PyJWTError, ValueError, TypeError, KeyError) as exc:
-            msg = 'JWKS fetch failed'
-            raise UpstreamFetchError(msg) from exc
-
-
-_discovery_cache: dict[str, tuple[float, dict[str, Any]]] = {}
-_jwk_clients: dict[str, PyJWKClient] = {}
-_cache_lock = Lock()
-
-
-def _reset_logout_caches() -> None:
-    """Clear process-local discovery documents and JWK clients for tests."""
-    with _cache_lock:
-        _discovery_cache.clear()
-        _jwk_clients.clear()
-
-
-def _discovery() -> dict[str, Any]:
-    """Fetch and cache discovery per URL for the configured TTL."""
-    url = discovery_url()
-    ttl = get_settings()['DISCOVERY_CACHE_SECONDS']
-    with _cache_lock:
-        cached = _discovery_cache.get(url)
-        if ttl and cached and time.monotonic() < cached[0]:
-            return cached[1]
-        try:
-            response = requests.get(url, timeout=HTTP_TIMEOUT_SECONDS)
-            response.raise_for_status()
-            result = response.json()
-        except (requests.RequestException, ValueError) as exc:
-            msg = 'Discovery fetch failed'
-            raise UpstreamFetchError(msg) from exc
-        if not isinstance(result, dict) or any(
-            not isinstance(result.get(key), str) or not result[key] for key in ('issuer', 'jwks_uri')
-        ):
-            msg = 'Invalid discovery document'
-            raise UpstreamFetchError(msg)
-        _discovery_cache[url] = (time.monotonic() + ttl, result)
-        return result
-
-
-def _jwk_client(uri: str) -> PyJWKClient:
-    """Reuse the JWK-set TTL cache; never retain removed keys in a key LRU."""
-    with _cache_lock:
-        if uri not in _jwk_clients:
-            try:
-                _jwk_clients[uri] = _LogoutJWKClient(
-                    uri,
-                    timeout=HTTP_TIMEOUT_SECONDS,
-                    cache_jwk_set=True,
-                    # PyJWT's default refetch cooldown stays on: the endpoint is reachable from the
-                    # internet, and tokens with random kids must not turn into one JWKS fetch each.
-                    cache_keys=False,
-                )
-            except jwt.PyJWKClientError as exc:
-                msg = 'Invalid discovery JWKS URI'
-                raise UpstreamFetchError(msg) from exc
-        return _jwk_clients[uri]
 
 
 def _decode_logout_token(token: str, *, discovery: dict[str, Any], client_id: str) -> dict[str, Any]:
@@ -120,7 +47,7 @@ def _decode_logout_token(token: str, *, discovery: dict[str, Any], client_id: st
     backchannel-logout event, absence of a nonce claim, presence of sid
     (this RP only tracks sid, not sub-wide logout).
     """
-    signing_key = _jwk_client(discovery['jwks_uri']).get_signing_key_from_jwt(token)
+    signing_key = oidc.jwk_client(discovery['jwks_uri']).get_signing_key_from_jwt(token)
     claims: dict[str, Any] = jwt.decode(
         token,
         signing_key.key,
@@ -160,8 +87,8 @@ def backchannel_logout(request: HttpRequest) -> HttpResponse:
 
         client_id = get_settings()['CLIENT_ID']
         try:
-            claims = _decode_logout_token(token, discovery=_discovery(), client_id=client_id)
-        except UpstreamFetchError:
+            claims = _decode_logout_token(token, discovery=oidc.discovery(), client_id=client_id)
+        except oidc.UpstreamFetchError:
             status = 503
             logger.warning('back-channel logout: upstream discovery/JWKS fetch failed')
             return HttpResponse('logout upstream unavailable', status=status)
@@ -275,7 +202,7 @@ def global_logout(request: HttpRequest) -> HttpResponse:
     auth_logout(request)
 
     try:
-        end_session_endpoint = _discovery().get('end_session_endpoint')
+        end_session_endpoint = oidc.discovery().get('end_session_endpoint')
     except Exception:
         logger.warning('global logout: discovery fetch failed; redirecting to local fallback')
         end_session_endpoint = None

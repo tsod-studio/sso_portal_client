@@ -296,6 +296,65 @@ your session self-renewing forever (see the docstring on
 `sso_portal_client.views.session_ping`, which mirrors the portal's Flask
 reference RP). Consequently, do not enable `SESSION_SAVE_EVERY_REQUEST`.
 
+## Authorize only (a second person's approval)
+
+When an action at one terminal needs someone else's approval (a manager
+approving a refund at a clerk's desk), the portal's authorize-only endpoint
+(its app integration guide, section 9) identifies that person without
+signing anyone in or out. `sso_portal_client.authorize_only` is the client
+for it. Register a **separate** portal Application for it, so its id_tokens
+can never sign anyone in to your app (`aud` differs), and keep its
+credentials in your own settings:
+
+```python
+from sso_portal_client import authorize_only
+
+client = authorize_only.AuthorizeOnlyClient(client_id=..., client_secret=...)
+
+# 1. Start: fresh state, nonce and PKCE verifier for this one approval.
+request = authorize_only.AuthorizeOnlyRequest(
+    redirect_uri='https://rp.example/approve/callback/',
+    binding_message='Refund NT$500 at desk 1',  # shown as "Approve: ...", at most 60 characters
+)
+# Keep server-side: digest(request.state), digest(request.nonce),
+# request.code_verifier, the binding message and when you asked.
+popup_url = client.authorization_url(request)
+
+# 2. Callback (?state=...&code=...): find what you kept by digest(state), then
+claims = client.redeem(code=code, code_verifier=verifier, redirect_uri=redirect_uri)
+# raises AuthorizeOnlyError, reason 'portal_unavailable' or 'invalid_token'
+
+# 3. Bind the answer to the request.
+check = authorize_only.failed_check(
+    claims,
+    nonce_digest=kept_nonce_digest,
+    binding_message=kept_message,
+    requested_at=asked_at,
+    now=timezone.now(),
+    jti_used=lambda jti: Approval.objects.filter(jti=jti).exists(),  # your replay log, if you keep one
+)
+if check:
+    ...  # refuse: `check` names the first check that failed
+```
+
+`redeem` checks what only the portal can vouch for: the RS256 signature
+against the portal's keys, `iss`, `aud` (this client), `exp`, and that
+`exp`, `iat`, `iss`, `aud` and `sub` are present. `failed_check` checks the
+rest, in order: `nonce`, `acr` (`urn:mec:authorize-only`, so an ordinary
+sign-in never approves), no `sid`, `amr` (one of `methods`, by default every
+way the portal identifies: `pin`, `qr`, `pwd`, `line`), `auth_time` (no
+earlier than the request, at most `fresh_seconds` old, two minutes by
+default), `binding_message` (exactly the one sent), `jti` and the shape of
+`groups`. Which `groups` may approve what stays your decision.
+
+The client reuses the discovery document and JWK cache of the back-channel
+logout endpoint (`sso_portal_client.oidc`), with one difference: the
+id_token comes straight from the token endpoint, so an unknown `kid` means
+the portal just rotated its key, and the key set is fetched again at once
+instead of after PyJWT's cooldown. The URL defaults to `/switch/authorize/`
+on the portal's app origin (`SERVER_URL`'s); pass `authorize_url` to
+override it.
+
 ## Two-line widget integration
 
 Every RP embedding the portal's switch widget used to hand-roll five
