@@ -105,10 +105,11 @@ class AuthorizeOnlyRequest:
     binding_message: str = ''
     #: A portal username to preselect on the PIN list; empty sends none.
     login_hint: str = ''
-    state: str = field(default_factory=_token)
-    nonce: str = field(default_factory=_token)
+    # The request's secrets stay out of its repr, so a log line or traceback never carries them.
+    state: str = field(default_factory=_token, repr=False)
+    nonce: str = field(default_factory=_token, repr=False)
     #: The PKCE verifier: kept server-side, sent only with the code.
-    code_verifier: str = field(default_factory=_verifier)
+    code_verifier: str = field(default_factory=_verifier, repr=False)
 
     def __post_init__(self) -> None:
         if len(self.binding_message) > BINDING_MESSAGE_MAX_LENGTH:

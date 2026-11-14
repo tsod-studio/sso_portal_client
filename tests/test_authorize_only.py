@@ -134,6 +134,12 @@ class TestRequest:
         with pytest.raises(ValueError, match='binding_message'):
             authorize_only.AuthorizeOnlyRequest(redirect_uri=REDIRECT_URI, binding_message='x' * (limit + 1))
 
+    def test_its_secrets_stay_out_of_its_repr(self) -> None:
+        shown = repr(REQUEST)
+        assert REDIRECT_URI in shown
+        for secret in (REQUEST.state, REQUEST.nonce, REQUEST.code_verifier):
+            assert secret not in shown
+
     def test_digest(self) -> None:
         assert authorize_only.digest('abc') == 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
 
